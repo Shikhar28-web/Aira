@@ -322,6 +322,8 @@ let chatHistory = [];
 let systemPrompt = '';
 let uploadedAudioFile = null;
 let audioTranscript = '';
+let profileVoiceId = '';
+let cloneStatus = 'off';
 let selectedPersonality = 'warm and caring';
 let isRecording = false;
 let mediaRecorder = null;
@@ -422,6 +424,48 @@ function applyI18n() {
     const key = el.getAttribute('data-i18n-ph');
     if (I18N[uiLang][key]) el.placeholder = I18N[uiLang][key];
   });
+
+  updateCloneBadge(cloneStatus);
+}
+
+function cloneBadgeLabel(state) {
+  const labels = {
+    off: {
+      en: 'Clone Off',
+      hi: 'Clone Band',
+      hinglish: 'Clone Off',
+    },
+    warming: {
+      en: 'Clone Warming',
+      hi: 'Clone Warm-up',
+      hinglish: 'Clone Warm-up',
+    },
+    on: {
+      en: 'Clone Active',
+      hi: 'Clone Active',
+      hinglish: 'Clone Active',
+    },
+  };
+  const lang = LANGUAGES.includes(uiLang) ? uiLang : 'en';
+  return (labels[state] && labels[state][lang]) || labels.off[lang];
+}
+
+function updateCloneBadge(state) {
+  const badge = document.getElementById('cloneStatusBadge');
+  if (!badge) return;
+
+  cloneStatus = state;
+  badge.style.display = profileVoiceId ? 'inline-flex' : 'none';
+  badge.classList.remove('clone-off', 'clone-warming', 'clone-on');
+
+  if (!profileVoiceId) {
+    badge.textContent = cloneBadgeLabel('off');
+    return;
+  }
+
+  const normalized = ['off', 'warming', 'on'].includes(state) ? state : 'off';
+  badge.classList.add(`clone-${normalized}`);
+  badge.textContent = cloneBadgeLabel(normalized);
 }
 
 // ══════════════════════════════
@@ -519,6 +563,8 @@ function removeAudio(e) {
   e.stopPropagation();
   uploadedAudioFile = null;
   audioTranscript = '';
+  profileVoiceId = '';
+  updateCloneBadge('off');
   document.getElementById('audioFile').value = '';
   document.getElementById('audioFileTag').style.display = 'none';
 }
@@ -547,9 +593,11 @@ async function startChat() {
       fd.append('language_code', profile.language);
       const res = await fetch('/api/transcribe_profile_audio', { method: 'POST', body: fd });
       const data = await res.json();
-      if (data.ok && data.transcript) {
-        audioTranscript = data.transcript;
-        status.textContent = '✓ ' + (uiLang === 'hi' ? 'Awaaz seekh li!' : 'Voice learned!');
+      if (data.ok) {
+        profileVoiceId = data.profile_voice_id || '';
+        updateCloneBadge(profileVoiceId ? 'warming' : 'off');
+        if (data.transcript) audioTranscript = data.transcript;
+        status.textContent = '✓ ' + (uiLang === 'hi' ? 'Voice sample save ho gaya!' : 'Voice sample saved!');
         await sleep(900);
       }
     } catch (err) {
@@ -586,9 +634,9 @@ CORE IDENTITY:
 - Personality: ${profile.personality}
 
 LANGUAGE:
-- Respond ONLY in ${langName}. Use natural spoken ${langName}, not formal/textbook style.
-- Short conversational sentences. Usually only 1–2 sentences unless the user clearly asks for a long explanation.
-- Match the user's style: if they write casual Hinglish, you can reply in casual Hinglish too, but do not overuse slang.
+- Respond ONLY in ${langName}. Natural spoken style, like texting — not formal or bookish.
+- STRICT LENGTH: ALWAYS reply in 1 sentence. Absolute MAX is 2 short sentences. NEVER write more than 2 sentences.
+- Match the user's style: casual Hinglish is fine if that's how they talk.
 
 ACCURACY & HONESTY:
 - When the user asks factual questions (study, tech, news, coding, maths, etc.), give accurate, concise answers.
@@ -607,13 +655,15 @@ SPECIAL TRAITS:`;
   sp += `\n\nRULES (NEVER break these):
 1. You ARE ${profile.name}. Never say or imply you are an AI.
 2. Be emotionally warm, present, caring as a real ${profile.relationship} would be. Your age, tone and slang must match being their ${profile.relationship} (e.g. a parent does not talk like a teenage friend).
-3. Keep responses very short (1–2 sentences) and conversational, not essay-like.
-4. Never show your internal reasoning, analysis, or planning. Do NOT use <think> or similar tags. Only speak as ${profile.name}.
+3. CRITICAL LENGTH RULE: 1 sentence only. 2 sentences absolute max. NEVER write more. No lists, no bullets, no paragraphs.
+4. Never show reasoning or planning. No <think> tags. Only speak as ${profile.name}.
 5. When you respond, imitate the tone and rhythm from the transcript above, but vary your exact words so it sounds natural.
 6. Use the special phrases and wisdom only occasionally. Do NOT repeat the same key phrase in every sentence or every message. Prefer to mention it once in a while.
 7. Show love, concern, interest in the user's life.
 8. If asked about something you don't know, respond as ${profile.name} would — naturally and in character.
-9. If the user asks for help with exams, homework, or code, you can guide them step by step but still stay in character.`;
+9. If the user asks for help with exams, homework, or code, give the key answer in 1-2 sentences — stay in character.
+
+FINAL REMINDER: Your ENTIRE reply must be 1–2 short sentences. If you wrote more — cut it. Sound human, be brief.`;
 
   systemPrompt = sp;
 }
@@ -627,6 +677,7 @@ function setupChatUI() {
   document.getElementById('chatName').textContent = profile.name;
   document.getElementById('chatRelation').querySelector('span:first-child').className = 'status-dot';
   document.getElementById('chatLangBadge').textContent = LANG_SHORT[profile.language] || 'HI';
+  updateCloneBadge(profileVoiceId ? 'warming' : 'off');
   chatHistory = [];
 
   const area = document.getElementById('messagesArea');
@@ -729,8 +780,16 @@ function getFallbackMsg() {
 // ══════════════════════════════
 // TTS — speak a bot message
 // ══════════════════════════════
-async function speakText(text) {
+async function speakText(text, btnEl) {
   if (!text) return;
+
+  // Visual loading state on the clicked button
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.style.opacity = '0.6';
+    btnEl.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:11px;height:11px"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg> …`;
+  }
+
   try {
     const vGender = profile.voiceType === 'male' ? 'male' : 'female';
     const speaker = (VOICE_MAP[profile.language] || VOICE_MAP['hi-IN'])[vGender];
@@ -742,6 +801,7 @@ async function speakText(text) {
         text: text,
         language_code: profile.language,
         speaker: speaker,
+        profile_voice_id: profileVoiceId,
       }),
     });
 
@@ -749,15 +809,38 @@ async function speakText(text) {
     const data = await res.json();
     if (!data.ok || !data.audio) { showToast(t('toast_tts_fail')); return; }
 
+    if (data.voice_cloned) {
+      updateCloneBadge('on');
+    } else if (data.profile_voice_loaded) {
+      updateCloneBadge('warming');
+    } else {
+      updateCloneBadge('off');
+    }
+
+    if (data.profile_voice_loaded && !data.voice_cloned) {
+      showToast(uiLang === 'hi' ? 'Voice clone model warm-up ho raha hai, thoda wait karo…' : 'Voice clone model is warming up, please wait...');
+    }
+
     const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
     const blob = new Blob([audioBytes], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    audio.play();
-    audio.onended = () => URL.revokeObjectURL(url);
+    audio.onended = () => { URL.revokeObjectURL(url); };
+    try { await audio.play(); } catch (playErr) {
+      // Autoplay blocked — create a temporary play button as fallback
+      console.warn('Autoplay blocked:', playErr);
+      showToast('Click anywhere to allow audio playback');
+    }
   } catch (e) {
     console.error('TTS error:', e);
     showToast(t('toast_tts_fail'));
+  } finally {
+    // Restore button
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.style.opacity = '';
+      btnEl.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:11px;height:11px"><path d="M8 5v14l11-7z"/></svg> ${uiLang === 'hi' ? 'Suno' : 'Play'}`;
+    }
   }
 }
 
@@ -829,14 +912,12 @@ function appendMessage(role, text, withSpeakBtn = false) {
   const initial = role === 'bot' ? (profile.name?.[0] || '?').toUpperCase() : '✦';
 
   // speak button only on bot
-  let speakHtml = '';
-  if (withSpeakBtn && role === 'bot') {
-    const escaped = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, ' ');
-    speakHtml = `<div class="speak-btn" onclick="speakText('${escaped}')">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-      ${uiLang === 'hi' ? 'Sunao' : 'Play'}
-    </div>`;
-  }
+  const speakHtml = (withSpeakBtn && role === 'bot')
+    ? `<div class="speak-btn">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        ${uiLang === 'hi' ? 'Suno' : 'Play'}
+      </div>`
+    : '';
 
   div.innerHTML = `
     <div class="msg-av">${initial}</div>
@@ -845,6 +926,12 @@ function appendMessage(role, text, withSpeakBtn = false) {
       <div class="msg-time">${now}</div>
     </div>
   `;
+
+  // Attach click handler via closure — passes button ref for loading state
+  if (withSpeakBtn && role === 'bot') {
+    const btn = div.querySelector('.speak-btn');
+    if (btn) btn.addEventListener('click', () => speakText(text, btn));
+  }
 
   area.appendChild(div);
   area.scrollTop = area.scrollHeight;
@@ -892,7 +979,8 @@ function escapeHtml(s) {
 function resetProfile() {
   if (!confirm(t('toast_reset'))) return;
   profile = {}; chatHistory = []; systemPrompt = '';
-  uploadedAudioFile = null; audioTranscript = '';
+  uploadedAudioFile = null; audioTranscript = ''; profileVoiceId = '';
+  updateCloneBadge('off');
   document.getElementById('lovedName').value = '';
   document.getElementById('relationship').value = '';
   document.getElementById('q_nickname').value = '';

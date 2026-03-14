@@ -6,6 +6,7 @@ __pycache__/
 # Virtual environments
 venv/
 .venv/
+.venv310/
 env/
 
 # Secrets and local env files
@@ -22,3 +23,8 @@ node_modules/
 out/
 dist/
 *.log
+
+# Runtime-generated backend audio artifacts
+backend/assets/profile_voices/
+backend/assets/*.wav
+backend/assets/*.mp3

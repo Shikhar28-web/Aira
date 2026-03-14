@@ -1,80 +1,79 @@
 """
-Apna Saathi - Backend Server
-Proxies all Sarvam AI API calls to avoid browser CORS errors.
+SarvSathi — Fully Offline AI Assistant
+=======================================
+4-agent pipeline — no cloud APIs required.
 Run: python server.py
-Then open: http://localhost:5000
+Then open: http://127.0.0.1:5000
 """
 
 import os
-import json
-import base64
+import sys
 import re
-import requests
-from dotenv import load_dotenv
+import threading
+import uuid
+from glob import glob
+
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 
-# Load .env from project root
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"), override=False)
+# ── Make sure the backend package is importable ───────────────────────────────
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
 
-# Flask app with paths to frontend folder
+from agents.listener_agent import ListenerAgent
+from agents.brain_agent    import BrainAgent, JARVIS_SYSTEM
+from agents.action_agent   import ActionAgent
+from agents.voice_agent    import VoiceAgent
+from agents.wake_agent     import WakeAgent
+
+# ── Config from environment (all optional — sensible defaults) ────────────────
+_DEVICE       = os.getenv("SARVSATHI_DEVICE",  "cpu")
+_WHISPER_MODEL = os.getenv("WHISPER_MODEL",    "medium")
+_OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL",     "mistral")
+_OLLAMA_URL    = os.getenv("OLLAMA_URL",       "http://localhost:11434")
+_WAKE_ENABLED  = os.getenv("SARVSATHI_WAKE",   "true").lower() in {"1", "true", "yes"}
+_PROFILE_TRANSCRIBE = os.getenv("SARVSATHI_PROFILE_TRANSCRIBE", "false").lower() in {"1", "true", "yes"}
+
+# ── Initialise agents (models are lazy-loaded on first use) ───────────────────
+_listener = ListenerAgent(model_size=_WHISPER_MODEL, device=_DEVICE)
+_brain    = BrainAgent(model=_OLLAMA_MODEL, ollama_url=_OLLAMA_URL)
+_action   = ActionAgent()
+_voice    = VoiceAgent(device=_DEVICE)
+_wake     = WakeAgent() if _WAKE_ENABLED else None
+
+if _wake:
+    _wake.start()
+
+# Warm-load XTTS in background so voice cloning becomes available sooner.
+threading.Thread(target=_voice._load_xtts_background, daemon=True).start()
+
+# ── Flask app ─────────────────────────────────────────────────────────────────
+_FRONTEND_DIR = os.path.join(_BACKEND_DIR, "..", "frontend")
+_PROFILE_VOICES_DIR = os.path.join(_BACKEND_DIR, "assets", "profile_voices")
+os.makedirs(_PROFILE_VOICES_DIR, exist_ok=True)
+
 app = Flask(
     __name__,
-    template_folder=os.path.join(os.path.dirname(__file__), "..", "frontend", "templates"),
-    static_folder=os.path.join(os.path.dirname(__file__), "..", "frontend", "static"),
+    template_folder=os.path.abspath(os.path.join(_FRONTEND_DIR, "templates")),
+    static_folder=os.path.abspath(os.path.join(_FRONTEND_DIR, "static")),
 )
 
-
-def _env_flag(name: str, default: bool = False) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
-cors_origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5000,http://127.0.0.1:5000",
-)
-CORS(
-    app,
-    resources={
-        r"/api/*": {
-            "origins": [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
-        }
-    },
-)
+# ── Utils ─────────────────────────────────────────────────────────────────────
 
-# Load Sarvam API key from environment for safety
-SARVAM_KEY = os.getenv("SARVAM_API_KEY")
-if not SARVAM_KEY:
-    raise RuntimeError(
-        "SARVAM_API_KEY environment variable is not set. "
-        "Set it to your Sarvam API key before running the server."
-    )
-
-SARVAM_BASE = "https://api.sarvam.ai"
-
-HEADERS_JSON = {
-    "api-subscription-key": SARVAM_KEY,
-    "Content-Type": "application/json",
-}
-HEADERS_PLAIN = {
-    "api-subscription-key": SARVAM_KEY,
-}
-
-# Optional: Gemini for higher‑quality text replies
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-# Use the current recommended model id
-GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_URL = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-)
+def _strip_think(text: str) -> str:
+    """Remove <think>…</think> reasoning blocks from model output."""
+    if "<think" not in text.lower():
+        return text
+    return re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip() or text
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Serve Frontend
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
@@ -83,177 +82,110 @@ def index():
 
 @app.route("/static/<path:filename>")
 def static_files(filename):
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "static")
-    return send_from_directory(static_dir, filename)
+    return send_from_directory(app.static_folder, filename)
 
 
-# ─────────────────────────────────────────────
-# /api/chat  — LLM (Sarvam-M)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/status  — health check
+# ─────────────────────────────────────────────────────────────────────────────
 
-def _strip_think(content: str) -> str:
-    """
-    Remove <think>...</think> blocks so the user only hears the final answer.
-    """
-    if not isinstance(content, str) or "<think" not in content.lower():
-        return content
-    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", content, flags=re.IGNORECASE).strip()
-    return cleaned or content
+@app.route("/api/status", methods=["GET"])
+def status():
+    return jsonify({
+        "ok": True,
+        "device":        _DEVICE,
+        "whisper_model": _WHISPER_MODEL,
+        "llm_model":     _OLLAMA_MODEL,
+        "wake_enabled":  _WAKE_ENABLED,
+    })
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/wake_status  — did the wake-word fire?
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/wake_status", methods=["GET"])
+def wake_status():
+    if _wake and _wake.detected.is_set():
+        _wake.detected.clear()
+        return jsonify({"detected": True})
+    return jsonify({"detected": False})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/chat  — LLM (Ollama / Mistral, fully offline)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
     try:
-        data = request.get_json()
-        system_prompt = data.get("system", "")
-        messages = data.get("messages", [])
+        data          = request.get_json(force=True) or {}
+        system_prompt = data.get("system", JARVIS_SYSTEM)
+        messages      = data.get("messages", [])
 
-        # If a Gemini API key is provided, use Gemini for text replies
-        if GEMINI_KEY:
-            try:
-                contents = []
-                for m in messages:
-                    role = m.get("role")
-                    if role == "user":
-                        g_role = "user"
-                    elif role == "assistant":
-                        g_role = "model"
-                    else:
-                        continue
-                    contents.append(
-                        {
-                            "role": g_role,
-                            "parts": [{"text": m.get("content", "")}],
-                        }
-                    )
-
-                g_payload = {
-                    "system_instruction": {
-                        "parts": [{"text": system_prompt}],
-                    },
-                    "contents": contents,
-                    "generationConfig": {
-                        # lower temperature + topP → more stable, less random
-                        "temperature": 0.25,
-                        "topP": 0.85,
-                        "maxOutputTokens": 160,
-                    },
-                }
-
-                g_resp = requests.post(
-                    GEMINI_URL,
-                    params={"key": GEMINI_KEY},
-                    json=g_payload,
-                    timeout=30,
-                )
-                g_resp.raise_for_status()
-                g_result = g_resp.json()
-
-                text_reply = ""
-                for cand in g_result.get("candidates", []):
-                    parts = cand.get("content", {}).get("parts", [])
-                    for p in parts:
-                        if "text" in p:
-                            text_reply += p["text"]
-                    if text_reply:
-                        break
-
-                raw_reply = text_reply or ""
-                reply = _strip_think(raw_reply)
-                return jsonify({"reply": reply.strip(), "ok": True})
-
-            except Exception as ge:
-                # Log and fall back to Sarvam-M
-                print(f"[GEMINI CHAT ERROR] {ge}")
-
-        # Fallback: use Sarvam-M chat completions
-        payload = {
-            "model": "sarvam-m",
-            "messages": [{"role": "system", "content": system_prompt}] + messages,
-            "max_tokens": 350,
-            # lower temperature → less random, more stable answers
-            "temperature": 0.3,
-            "top_p": 0.9,
-            # ask model to use deeper reasoning
-            "reasoning_effort": "high",
-        }
-
-        resp = requests.post(
-            f"{SARVAM_BASE}/v1/chat/completions",
-            headers=HEADERS_JSON,
-            json=payload,
-            timeout=30,
+        result = _brain.think(
+            user_text=messages[-1]["content"] if messages else "",
+            system_prompt=system_prompt,
+            history=messages[:-1],
         )
-        resp.raise_for_status()
-        result = resp.json()
 
-        raw_reply = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        reply = _strip_think(raw_reply)
-        return jsonify({"reply": reply, "ok": True})
+        reply = _strip_think(result.get("response", ""))
 
-    except requests.exceptions.HTTPError as e:
-        print(f"[CHAT HTTP ERROR] {e.response.status_code}: {e.response.text}")
-        return jsonify(
-            {
-                "ok": False,
-                "error": f"Sarvam API error: {e.response.status_code}",
-                "detail": e.response.text,
-            }
-        ), 502
+        # Fire OS action in a background thread (non-blocking)
+        action = result.get("action")
+        if action:
+            threading.Thread(
+                target=_action.execute, args=(action,), daemon=True
+            ).start()
+
+        return jsonify({"reply": reply, "ok": True, "action": action})
+
     except Exception as e:
         print(f"[CHAT ERROR] {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ─────────────────────────────────────────────
-# /api/tts  — Text to Speech (Bulbul v2)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/tts  — Text to Speech (Coqui XTTS v2, fully offline)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/api/tts", methods=["POST"])
 def tts():
     try:
-        data = request.get_json()
-        text = data.get("text", "")[:500]
+        data = request.get_json(force=True) or {}
+        text = (data.get("text", "") or "")[:500]
         lang = data.get("language_code", "hi-IN")
-        speaker = data.get("speaker", "meera")
+        profile_voice_id = (data.get("profile_voice_id") or "").strip()
 
-        payload = {
-            "inputs": [text],
-            "target_language_code": lang,
-            "speaker": speaker,
-            "model": "bulbul:v2",
-            "pitch": 0,
-            "pace": 1.0,
-            "loudness": 1.5,
-            "enable_preprocessing": True,
-        }
+        speaker_wav = None
+        if profile_voice_id:
+            matches = glob(os.path.join(_PROFILE_VOICES_DIR, f"{profile_voice_id}.*"))
+            if matches:
+                speaker_wav = matches[0]
 
-        resp = requests.post(
-            f"{SARVAM_BASE}/text-to-speech",
-            headers=HEADERS_JSON,
-            json=payload,
-            timeout=30,
+        audio_b64, cloned = _voice.synthesize(
+            text,
+            language_code=lang,
+            speaker_wav=speaker_wav,
         )
-        resp.raise_for_status()
-        result = resp.json()
-
-        audio_b64 = result.get("audios", [None])[0]
         if not audio_b64:
-            return jsonify({"ok": False, "error": "No audio returned"}), 502
+            return jsonify({"ok": False, "error": "TTS returned no audio"}), 500
 
-        return jsonify({"ok": True, "audio": audio_b64})
+        return jsonify({
+            "ok": True,
+            "audio": audio_b64,
+            "voice_cloned": bool(cloned),
+            "profile_voice_loaded": bool(speaker_wav),
+        })
 
-    except requests.exceptions.HTTPError as e:
-        print(f"[TTS HTTP ERROR] {e.response.status_code}: {e.response.text}")
-        return jsonify({"ok": False, "error": f"TTS error: {e.response.status_code}", "detail": e.response.text}), 502
     except Exception as e:
         print(f"[TTS ERROR] {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ─────────────────────────────────────────────
-# /api/stt  — Speech to Text (Saarika v2.5)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/stt  — Speech to Text (Faster-Whisper, fully offline)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/api/stt", methods=["POST"])
 def stt():
@@ -261,43 +193,22 @@ def stt():
         if "audio" not in request.files:
             return jsonify({"ok": False, "error": "No audio file provided"}), 400
 
-        audio_file = request.files["audio"]
-        lang = request.form.get("language_code", "hi-IN")
+        audio_file  = request.files["audio"]
+        lang        = request.form.get("language_code", "hi-IN")
+        audio_bytes = audio_file.read()
 
-        files = {
-            "file": (
-                audio_file.filename or "audio.wav",
-                audio_file.stream,
-                audio_file.content_type or "audio/webm",
-            )
-        }
-        data_form = {"model": "saarika:v2.5", "language_code": lang}
-
-        resp = requests.post(
-            f"{SARVAM_BASE}/speech-to-text",
-            headers=HEADERS_PLAIN,
-            files=files,
-            data=data_form,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        result = resp.json()
-
-        transcript = result.get("transcript", "")
+        result     = _listener.transcribe(audio_bytes, language_code=lang)
+        transcript = result.get("user_text", "")
         return jsonify({"ok": True, "transcript": transcript})
 
-    except requests.exceptions.HTTPError as e:
-        print(f"[STT HTTP ERROR] {e.response.status_code}: {e.response.text}")
-        return jsonify({"ok": False, "error": f"STT error: {e.response.status_code}", "detail": e.response.text}), 502
     except Exception as e:
         print(f"[STT ERROR] {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ─────────────────────────────────────────────
-# /api/transcribe_profile_audio
-# Upload a reference audio to learn speech style (Saarika v2.5)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/transcribe_profile_audio  — same as /api/stt (kept for UI compatibility)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/api/transcribe_profile_audio", methods=["POST"])
 def transcribe_profile_audio():
@@ -305,47 +216,81 @@ def transcribe_profile_audio():
         if "audio" not in request.files:
             return jsonify({"ok": False, "error": "No file"}), 400
 
-        audio_file = request.files["audio"]
-        lang = request.form.get("language_code", "hi-IN")
+        audio_file  = request.files["audio"]
+        lang        = request.form.get("language_code", "hi-IN")
+        original_name = (audio_file.filename or "profile.wav").strip()
+        _, ext = os.path.splitext(original_name)
+        ext = (ext or ".wav").lower()
+        if len(ext) > 10 or not re.fullmatch(r"\.[a-z0-9]+", ext):
+            ext = ".wav"
 
-        files = {
-            "file": (
-                audio_file.filename,
-                audio_file.stream,
-                audio_file.content_type or "audio/mpeg",
-            )
-        }
-        data_form = {"model": "saarika:v2.5", "language_code": lang}
+        audio_bytes = audio_file.read()
 
-        resp = requests.post(
-            f"{SARVAM_BASE}/speech-to-text",
-            headers=HEADERS_PLAIN,
-            files=files,
-            data=data_form,
-            timeout=60,
-        )
-        resp.raise_for_status()
-        result = resp.json()
-        transcript = result.get("transcript", "")
-        return jsonify({"ok": True, "transcript": transcript})
+        profile_voice_id = uuid.uuid4().hex
+        save_path = os.path.join(_PROFILE_VOICES_DIR, f"{profile_voice_id}{ext}")
+        with open(save_path, "wb") as fh:
+            fh.write(audio_bytes)
 
-    except requests.exceptions.HTTPError as e:
-        print(f"[PROFILE STT ERROR] {e.response.status_code}: {e.response.text}")
-        return jsonify({"ok": False, "error": f"Transcription failed: {e.response.status_code}"}), 502
+        transcript = ""
+        warning = None
+        if _PROFILE_TRANSCRIBE:
+            try:
+                result = _listener.transcribe(audio_bytes, language_code=lang)
+                transcript = result.get("user_text", "")
+            except Exception as stt_exc:
+                # Voice cloning should still work even if STT dependencies are unavailable.
+                warning = f"profile transcription unavailable: {stt_exc}"
+                print(f"[PROFILE STT WARN] {stt_exc}")
+        else:
+            warning = "profile transcription skipped (SARVSATHI_PROFILE_TRANSCRIBE=false)"
+
+        return jsonify({
+            "ok": True,
+            "transcript": transcript,
+            "profile_voice_id": profile_voice_id,
+            "warning": warning,
+        })
+
     except Exception as e:
         print(f"[PROFILE STT ERROR] {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/action  — run an OS action directly
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/action", methods=["POST"])
+def action():
+    try:
+        data        = request.get_json(force=True) or {}
+        action_name = data.get("action", "")
+        if not action_name:
+            return jsonify({"ok": False, "error": "action field required"}), 400
+
+        result = _action.execute(action_name)
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"[ACTION ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    app_host = os.getenv("APP_HOST", "127.0.0.1")
-    app_port = int(os.getenv("APP_PORT", "5000"))
-    app_debug = _env_flag("FLASK_DEBUG", default=False)
+    host  = os.getenv("APP_HOST", "127.0.0.1")
+    port  = int(os.getenv("APP_PORT", "5000"))
+    debug = os.getenv("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
 
-    print("\n" + "="*50)
-    print("  Apna Saathi - Server Starting")
-    print(f"  Open in browser: http://{app_host}:{app_port}")
-    print("="*50 + "\n")
-    app.run(debug=app_debug, port=app_port, host=app_host)
+    print("\n" + "=" * 60)
+    print("  SarvSathi \u2014 Fully Offline AI Assistant")
+    print(f"  Device        : {_DEVICE}")
+    print(f"  Whisper model : {_WHISPER_MODEL}")
+    print(f"  LLM           : {_OLLAMA_MODEL}  @  {_OLLAMA_URL}")
+    print(f"  Wake word     : {'enabled' if _WAKE_ENABLED else 'disabled'}")
+    print("=" * 60)
+    print(f"\n  Open in browser: http://{host}:{port}")
+    print("  Press Ctrl+C to stop\n")
+
+    app.run(debug=debug, port=port, host=host, use_reloader=False)
