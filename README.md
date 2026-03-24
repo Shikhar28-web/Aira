@@ -29,6 +29,20 @@ Frontend:
 
 ## Models Used (All So Far + Latest)
 
+## LLM Names (One Place)
+
+Current (offline, Ollama):
+- `qwen2.5:7b-instruct` (default in `backend/server.py`)
+- `mistral` (default in `sarvsathi.py`)
+
+Used earlier (legacy cloud stack):
+- `gemini-2.5-flash`
+- `sarvam-m`
+
+Also supported in BrainAgent with Ollama (if installed locally):
+- `phi3`
+- `llama3`
+
 ### A) Latest / current model stack (offline-first)
 
 1. STT (speech-to-text)
