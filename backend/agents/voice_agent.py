@@ -109,6 +109,12 @@ class VoiceAgent:
         if not text:
             return None, False
 
+        clone_requested = bool(speaker_wav and os.path.exists(speaker_wav))
+        if clone_requested and VoiceAgent._xtts_model is None:
+            # For clone requests, prefer a blocking XTTS load once so first
+            # cloned reply is actually cloned instead of immediate fallback voice.
+            self._load_xtts_blocking()
+
         # XTTS already loaded — use it
         if VoiceAgent._xtts_model is not None:
             try:
@@ -141,6 +147,26 @@ class VoiceAgent:
             return audio, False
         return self._windows_system_speech_synthesize(text), False
 
+    def _load_xtts_blocking(self) -> None:
+        """Load XTTS synchronously; used for first voice-clone request."""
+        with VoiceAgent._xtts_lock:
+            if VoiceAgent._xtts_model is not None:
+                self._xtts_ok = True
+                return
+            try:
+                os.environ.setdefault("COQUI_TOS_AGREED", "1")
+                from TTS.api import TTS  # noqa: PLC0415
+
+                print("[VoiceAgent] Loading Coqui XTTS v2 for clone request …")
+                m = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+                m.to(self.device)
+                VoiceAgent._xtts_model = m
+                self._xtts_ok = True
+                print("[VoiceAgent] XTTS v2 loaded (blocking path).")
+            except Exception as exc:
+                print(f"[VoiceAgent] XTTS blocking load failed ({exc}).")
+                self._xtts_ok = False
+
     def _load_xtts_background(self) -> None:
         """Load XTTS v2 in a background thread so the first TTS call isn't blocked."""
         with VoiceAgent._xtts_lock:
@@ -160,6 +186,10 @@ class VoiceAgent:
             except Exception as exc:
                 print(f"[VoiceAgent] XTTS v2 load failed ({exc}). Staying on pyttsx3.")
                 self._xtts_ok = False
+
+    def is_clone_ready(self) -> bool:
+        """True when XTTS is loaded and clone synthesis is available."""
+        return VoiceAgent._xtts_model is not None and self._xtts_ok is True
 
     # ── XTTS v2 ────────────────────────────────────────────────────────────
 
@@ -189,7 +219,7 @@ class VoiceAgent:
         }
         try:
             # Slightly faster speaking pace so cloned output feels less sluggish.
-            wav: list | np.ndarray = model.tts(**kwargs, speed=1.12)
+            wav: list | np.ndarray = model.tts(**kwargs, speed=1.28)
         except TypeError:
             # Older TTS builds may not expose speed; fallback safely.
             wav = model.tts(**kwargs)
@@ -225,7 +255,7 @@ class VoiceAgent:
             import pyttsx3  # noqa: PLC0415
 
             engine = pyttsx3.init()
-            engine.setProperty("rate",   165)
+            engine.setProperty("rate",   205)
             engine.setProperty("volume", 0.90)
 
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fh:

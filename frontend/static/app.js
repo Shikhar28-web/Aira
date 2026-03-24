@@ -811,14 +811,18 @@ async function speakText(text, btnEl) {
 
     if (data.voice_cloned) {
       updateCloneBadge('on');
-    } else if (data.profile_voice_loaded) {
+    } else if (data.profile_voice_loaded && data.clone_ready) {
       updateCloneBadge('warming');
+    } else if (data.profile_voice_loaded && !data.clone_ready) {
+      updateCloneBadge('off');
     } else {
       updateCloneBadge('off');
     }
 
-    if (data.profile_voice_loaded && !data.voice_cloned) {
+    if (data.profile_voice_loaded && !data.voice_cloned && data.clone_ready) {
       showToast(uiLang === 'hi' ? 'Voice clone model warm-up ho raha hai, thoda wait karo…' : 'Voice clone model is warming up, please wait...');
+    } else if (data.profile_voice_loaded && !data.clone_ready) {
+      showToast(uiLang === 'hi' ? 'Voice clone model load nahi hua, backend logs check karo.' : 'Voice clone model is unavailable, check backend logs.');
     }
 
     const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));

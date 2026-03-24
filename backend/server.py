@@ -11,6 +11,8 @@ import sys
 import re
 import threading
 import uuid
+import tempfile
+import subprocess
 from glob import glob
 
 from flask import Flask, request, jsonify, render_template, send_from_directory
@@ -30,7 +32,7 @@ from agents.wake_agent     import WakeAgent
 # ── Config from environment (all optional — sensible defaults) ────────────────
 _DEVICE       = os.getenv("SARVSATHI_DEVICE",  "cpu")
 _WHISPER_MODEL = os.getenv("WHISPER_MODEL",    "medium")
-_OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL",     "mistral")
+_OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL",     "qwen2.5:7b-instruct")
 _OLLAMA_URL    = os.getenv("OLLAMA_URL",       "http://localhost:11434")
 _WAKE_ENABLED  = os.getenv("SARVSATHI_WAKE",   "true").lower() in {"1", "true", "yes"}
 _PROFILE_TRANSCRIBE = os.getenv("SARVSATHI_PROFILE_TRANSCRIBE", "false").lower() in {"1", "true", "yes"}
@@ -71,6 +73,95 @@ def _strip_think(text: str) -> str:
     return re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip() or text
 
 
+def _resolve_tts_language_code(text: str, requested_lang: str) -> str:
+    """
+    Choose a better TTS language for mixed-script Hinglish text so cloned speech
+    does not drift into a wrong language pronunciation.
+    """
+    req = (requested_lang or "hi-IN").strip()
+    txt = (text or "").strip()
+    if not txt:
+        return req
+
+    has_devanagari = bool(re.search(r"[\u0900-\u097F]", txt))
+    ascii_letters = len(re.findall(r"[A-Za-z]", txt))
+
+    if has_devanagari:
+        return "hi-IN"
+
+    # Roman-script Hindi/Hinglish is usually pronounced better with en pipeline in XTTS.
+    if req == "hi-IN" and ascii_letters >= 4:
+        return "en-IN"
+
+    # For unsupported Indic language codes in XTTS, keep english for roman script input.
+    if req in {"bn-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN", "mr-IN", "gu-IN", "pa-IN"} and ascii_letters >= 4:
+        return "en-IN"
+
+    return req
+
+
+def _convert_profile_audio_to_wav(audio_bytes: bytes) -> bytes | None:
+    """
+    Convert arbitrary uploaded profile audio to mono WAV bytes.
+    XTTS cloning is most reliable with WAV input.
+    """
+    in_path = None
+    out_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".input", delete=False) as f_in:
+            f_in.write(audio_bytes)
+            in_path = f_in.name
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f_out:
+            out_path = f_out.name
+
+        # Preferred path: pydub (cleaner API).
+        try:
+            from pydub import AudioSegment  # noqa: PLC0415
+            from pydub import effects  # noqa: PLC0415
+            from pydub.silence import detect_nonsilent  # noqa: PLC0415
+
+            seg = AudioSegment.from_file(in_path)
+            # Trim long recordings to a compact, expressive chunk for better cloning.
+            nonsilent = detect_nonsilent(seg, min_silence_len=250, silence_thresh=seg.dBFS - 16)
+            if nonsilent:
+                start = max(nonsilent[0][0] - 120, 0)
+                end = min(nonsilent[-1][1] + 120, len(seg))
+                seg = seg[start:end]
+
+            # Keep 4s-18s window; too short/too long sample often hurts clone quality.
+            if len(seg) > 18_000:
+                seg = seg[:18_000]
+            if len(seg) < 4_000:
+                seg = seg + AudioSegment.silent(duration=(4_000 - len(seg)))
+
+            seg = effects.normalize(seg)
+            seg = seg.set_channels(1).set_frame_rate(24_000)
+            seg.export(out_path, format="wav")
+            with open(out_path, "rb") as fh:
+                return fh.read()
+        except Exception:
+            pass
+
+        # Fallback path: direct ffmpeg.
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", in_path, "-ar", "24000", "-ac", "1", out_path],
+            check=True,
+            capture_output=True,
+        )
+        with open(out_path, "rb") as fh:
+            return fh.read()
+    except Exception as exc:
+        print(f"[PROFILE AUDIO WARN] WAV conversion failed: {exc}")
+        return None
+    finally:
+        for p in [in_path, out_path]:
+            if p and os.path.exists(p):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Serve Frontend
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,6 +188,7 @@ def status():
         "whisper_model": _WHISPER_MODEL,
         "llm_model":     _OLLAMA_MODEL,
         "wake_enabled":  _WAKE_ENABLED,
+        "voice_clone_ready": _voice.is_clone_ready(),
     })
 
 
@@ -156,6 +248,7 @@ def tts():
         text = (data.get("text", "") or "")[:500]
         lang = data.get("language_code", "hi-IN")
         profile_voice_id = (data.get("profile_voice_id") or "").strip()
+        resolved_lang = _resolve_tts_language_code(text, lang)
 
         speaker_wav = None
         if profile_voice_id:
@@ -165,7 +258,7 @@ def tts():
 
         audio_b64, cloned = _voice.synthesize(
             text,
-            language_code=lang,
+            language_code=resolved_lang,
             speaker_wav=speaker_wav,
         )
         if not audio_b64:
@@ -176,6 +269,8 @@ def tts():
             "audio": audio_b64,
             "voice_cloned": bool(cloned),
             "profile_voice_loaded": bool(speaker_wav),
+            "clone_ready": _voice.is_clone_ready(),
+            "tts_language_used": resolved_lang,
         })
 
     except Exception as e:
@@ -218,18 +313,15 @@ def transcribe_profile_audio():
 
         audio_file  = request.files["audio"]
         lang        = request.form.get("language_code", "hi-IN")
-        original_name = (audio_file.filename or "profile.wav").strip()
-        _, ext = os.path.splitext(original_name)
-        ext = (ext or ".wav").lower()
-        if len(ext) > 10 or not re.fullmatch(r"\.[a-z0-9]+", ext):
-            ext = ".wav"
-
         audio_bytes = audio_file.read()
+        normalized_wav = _convert_profile_audio_to_wav(audio_bytes)
+        audio_to_store = normalized_wav or audio_bytes
+        stored_ext = ".wav" if normalized_wav else ".bin"
 
         profile_voice_id = uuid.uuid4().hex
-        save_path = os.path.join(_PROFILE_VOICES_DIR, f"{profile_voice_id}{ext}")
+        save_path = os.path.join(_PROFILE_VOICES_DIR, f"{profile_voice_id}{stored_ext}")
         with open(save_path, "wb") as fh:
-            fh.write(audio_bytes)
+            fh.write(audio_to_store)
 
         transcript = ""
         warning = None

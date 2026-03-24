@@ -132,6 +132,72 @@ def _detect_action(text: str) -> str | None:
     return None
 
 
+def _looks_factual_query(text: str) -> bool:
+    """Heuristic to detect factual/study/coding questions."""
+    low = (text or "").lower()
+    factual_markers = [
+        "what", "why", "how", "when", "where", "which",
+        "difference", "compare", "explain", "define", "example",
+        "python", "java", "code", "algorithm", "math", "formula",
+        "exam", "interview", "news", "fact", "capital", "history",
+        "kaise", "kyun", "kya", "kab", "kahan", "farak", "samjhao",
+    ]
+    return ("?" in low) or any(m in low for m in factual_markers)
+
+
+def _contains_any(text: str, words: list[str]) -> bool:
+    low = (text or "").lower()
+    return any(w in low for w in words)
+
+
+def _normalize_text(text: str) -> str:
+    low = (text or "").lower().strip()
+    low = re.sub(r"\s+", " ", low)
+    low = re.sub(r"[^\w\s]", "", low)
+    return low
+
+
+def _history_text(history: list[dict[str, Any]] | None) -> str:
+    if not history:
+        return ""
+    chunks: list[str] = []
+    for msg in history:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            chunks.append(content.lower())
+    return " ".join(chunks)
+
+
+def _recent_user_messages(history: list[dict[str, Any]] | None, limit: int = 5) -> list[str]:
+    if not history:
+        return []
+    out: list[str] = []
+    for msg in reversed(history):
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+            out.append(msg["content"].strip())
+            if len(out) >= limit:
+                break
+    return list(reversed(out))
+
+
+def _is_personal_chat(text: str) -> bool:
+    low = (text or "").lower()
+    personal_markers = [
+        "ghar", "maa", "mummy", "mom", "papa", "dad", "behen", "bhai",
+        "yaad", "miss", "kaise ho", "kya kar rahe", "khana", "aana",
+        "aunga", "aaunga", "milne", "baat", "haal",
+    ]
+    factual_markers = [
+        "python", "java", "code", "algorithm", "math", "formula",
+        "difference", "explain", "define", "news", "capital", "history",
+    ]
+    return any(m in low for m in personal_markers) and not any(m in low for m in factual_markers)
+
+
 # ── Brain Agent ────────────────────────────────────────────────────────────────
 
 class BrainAgent:
@@ -145,7 +211,7 @@ class BrainAgent:
 
     def __init__(
         self,
-        model: str = "mistral",
+        model: str = "qwen2.5:7b-instruct",
         ollama_url: str = "http://localhost:11434",
     ) -> None:
         self.model = model
@@ -206,18 +272,58 @@ class BrainAgent:
                     "response": self._polish_reply(direct),
                 }
 
+            # For personal/family chats, prefer grounded deterministic replies
+            # to avoid fabricated details and keep human tone consistent.
+            if _is_personal_chat(user_text):
+                safe = self._grounded_personal_reply(user_text, persona, history)
+                if safe:
+                    return {
+                        "intent": intent,
+                        "action": action,
+                        "response": self._polish_reply(safe),
+                    }
+
         # 2. Generate reply from Ollama
-        messages = [{"role": "system", "content": sys_prompt}]
+        latest_guard = (
+            "Important: Reply ONLY to the user's latest message and current topic. "
+            "Do not repeat old topics from previous turns unless user asked again. "
+            "If user asks family/home updates, answer that directly in natural human tone. "
+            "Never invent specific events (pets, purchases, incidents, dates) unless user already mentioned them."
+        )
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "system", "content": latest_guard},
+        ]
         messages.extend(history)
         messages.append({"role": "user", "content": user_text})
 
         response_text = self._call_ollama(messages)
         if not response_text:
-            response_text = self._fallback(user_text, sys_prompt, action)
+            if _looks_factual_query(user_text):
+                nick = persona.get("nickname", "beta")
+                response_text = (
+                    f"{nick}, abhi local LLM server reachable nahi hai, "
+                    "isliye sahi factual answer dene ke liye Ollama start karna padega."
+                )
+            else:
+                response_text = self._fallback(user_text, sys_prompt, action)
 
         topic_fix = self._topic_guard_reply(user_text, response_text, persona)
         if topic_fix:
             response_text = topic_fix
+
+        context_fix = self._contextual_guard_reply(user_text, response_text, persona)
+        if context_fix:
+            response_text = context_fix
+
+        if self._is_repetition_with_history(response_text, history):
+            alt = self._non_repetitive_reply(user_text, persona, history)
+            if alt:
+                response_text = alt
+
+        anti_hallucination = self._family_hallucination_guard(user_text, response_text, persona, history)
+        if anti_hallucination:
+            response_text = anti_hallucination
 
         if self._looks_generic(response_text, persona):
             response_text = self._fallback(user_text, sys_prompt, action)
@@ -230,6 +336,112 @@ class BrainAgent:
             "action":   action,
             "response": response_text,
         }
+
+    @staticmethod
+    def _is_repetition_with_history(text: str, history: list[dict[str, Any]] | None) -> bool:
+        if not text or not history:
+            return False
+        last_assistant = None
+        for msg in reversed(history):
+            if (msg or {}).get("role") == "assistant":
+                last_assistant = (msg or {}).get("content", "")
+                break
+        if not last_assistant:
+            return False
+        return _normalize_text(text) == _normalize_text(last_assistant)
+
+    @staticmethod
+    def _non_repetitive_reply(user_text: str, persona: dict[str, str], history: list[dict[str, Any]] | None) -> str | None:
+        u = (user_text or "").lower()
+        nick = (persona.get("nickname") or "beta").strip()
+
+        if _contains_any(u, ["kaise ho", "kaise h", "how are you", "kaisa ho"]):
+            variants = [
+                f"Haan {nick}, main bilkul theek hoon, tu bata aaj din kaisa gaya?",
+                f"Main theek hoon {nick}, tu apna haal bata na.",
+                f"Theek hoon {nick}, bas teri baat sunke aur achha lagta hai.",
+            ]
+            return random.choice(variants)
+
+        if _contains_any(u, ["ghar", "maa", "mummy", "mom", "papa", "dad", "choti", "behen", "sister", "bhai", "brother"]):
+            variants = [
+                f"{nick}, ghar pe sab badhiya hai aur sab tujhe yaad karte rehte hain.",
+                f"Sab theek hai {nick}, maa-papa dono acche hain aur choti bhi mast hai.",
+                f"{nick}, tension mat le, ghar mein sab safe aur theek hain.",
+            ]
+            return random.choice(variants)
+
+        if _contains_any(u, ["exam", "paper", "test", "interview"]):
+            variants = [
+                f"{nick}, tu preparation pe focus rakh, main hoon na, sab sambhal jayega.",
+                f"Accha kar raha hai {nick}, bas roz thoda revise kar aur confidence rakh.",
+                f"{nick}, exam ke liye short notes revise kar, result strong aayega.",
+            ]
+            return random.choice(variants)
+
+        return f"{nick}, samjha maine, tu bol main dhyaan se sun raha hoon."
+
+    @staticmethod
+    def _grounded_personal_reply(user_text: str, persona: dict[str, str], history: list[dict[str, Any]] | None) -> str | None:
+        """
+        Deterministic personal-chat layer to keep answers natural but factual.
+        Never invent events, people actions, or specific incidents.
+        """
+        u = (user_text or "").lower().strip()
+        nick = (persona.get("nickname") or "beta").strip()
+        recent = " ".join(_recent_user_messages(history, limit=6)).lower()
+
+        if _contains_any(u, ["kaise ho", "kaise h", "how are you", "kaisa ho"]):
+            return f"Haan {nick}, main theek hoon, tu bata tera din kaisa chal raha hai."
+
+        if _contains_any(u, ["ghar", "maa", "mummy", "mom", "papa", "dad", "behen", "bhai", "choti"]):
+            # Only provide safe generic status; no invented specifics.
+            return f"{nick}, ghar pe sab theek hain aur sab tujhe yaad kar rahe hain."
+
+        if _contains_any(u, ["agle hafte", "agla hafte", "aaunga", "aunga", "ghar aa", "milne aa"]):
+            return f"Bahut achha {nick}, tu aayega to bahut khushi hogi, bas safely aana."
+
+        if _contains_any(u, ["khana", "chole", "bhature", "banva", "bana", "khila"]):
+            # Reflect user wish without claiming it already happened.
+            return f"Theek hai {nick}, yaad rakha maine, tu aayega to pyaar se bana denge."
+
+        if _contains_any(u, ["yaad", "miss"]):
+            return f"Main bhi tujhe bahut yaad karta hoon {nick}, tu message karta rehna."
+
+        # If user message is short follow-up, respond warmly and ask a grounded prompt.
+        if len(u.split()) <= 8:
+            return f"Haan {nick}, samjha maine, aur bata abhi kya chal raha hai."
+
+        # Fall through to LLM for broader conversation.
+        if _contains_any(recent, ["python", "code", "exam", "interview", "project"]):
+            return None
+        return f"Samjha {nick}, main dhyaan se sun raha hoon, aaram se bol."
+
+    @staticmethod
+    def _family_hallucination_guard(
+        user_text: str,
+        model_reply: str,
+        persona: dict[str, str],
+        history: list[dict[str, Any]] | None,
+    ) -> str | None:
+        u = (user_text or "").lower()
+        r = (model_reply or "").lower()
+        h = _history_text(history)
+        nick = (persona.get("nickname") or "beta").strip()
+
+        family_words = ["ghar", "home", "maa", "mummy", "mom", "papa", "dad", "choti", "behen", "sister", "bhai", "brother"]
+        if not _contains_any(u, family_words):
+            return None
+
+        # Detect fabricated specifics that user/history never mentioned.
+        suspicious_specifics = [
+            "puppy", "dog", "cat", "pet", "bachpan", "childhood",
+            "naya", "new", "kharida", "adopt", "incident", "accident",
+        ]
+        if any(tok in r and tok not in u and tok not in h for tok in suspicious_specifics):
+            return f"{nick}, ghar pe sab theek hai aur sab tujhe yaad kar rahe hain, tu tension mat le."
+
+        return None
 
     # ── Ollama HTTP call ────────────────────────────────────────────────────
 
@@ -244,10 +456,10 @@ class BrainAgent:
                     "messages": messages,
                     "stream":   False,
                     "options":  {
-                        "temperature":   0.55,
-                        "top_p":         0.85,
-                        "num_predict":   90,
-                        "repeat_penalty": 1.15,
+                        "temperature":   0.45,
+                        "top_p":         0.8,
+                        "num_predict":   110,
+                        "repeat_penalty": 1.22,
                         "stop":          ["\n\n", "###", "Human:", "User:"],
                     },
                 },
@@ -342,6 +554,32 @@ class BrainAgent:
         if any(k in u for k in ["interview", "interview hai", "naukri", "job"]):
             if not any(k in r for k in ["interview", "confidence", "prepare", "taiyaar"]):
                 return f"{nick}, interview se pehle 3 common answers rehearse kar aur 2 deep breaths le, tu bilkul accha karega."
+
+        return None
+
+    @staticmethod
+    def _contextual_guard_reply(user_text: str, model_reply: str, persona: dict[str, str]) -> str | None:
+        """
+        Keep responses grounded to the latest conversational topic and avoid
+        stale repetition (e.g. repeating exam talk for unrelated family query).
+        """
+        u = (user_text or "").lower()
+        r = (model_reply or "").lower()
+        nick = (persona.get("nickname") or "beta").strip()
+
+        family_words = ["ghar", "home", "maa", "mummy", "mom", "papa", "dad", "choti", "behen", "sister", "bhai", "brother"]
+        exam_words = ["exam", "exams", "paper", "test", "interview"]
+
+        user_about_family = _contains_any(u, family_words)
+        reply_stuck_on_exam = _contains_any(r, exam_words) and not _contains_any(u, exam_words)
+
+        if user_about_family and reply_stuck_on_exam:
+            return f"{nick}, ghar pe sab theek chal raha hai, maa bhi theek hain aur choti bhi mast hai, tu bas apna dhyaan rakh."
+
+        # If user asks "how are they" style family update, force a direct human answer.
+        if user_about_family and _contains_any(u, ["kaise", "kaisi", "kaisa", "how"]):
+            if not _contains_any(r, family_words):
+                return f"{nick}, ghar pe sab badhiya hai aur sab tujhe yaad kar rahe hain."
 
         return None
 
