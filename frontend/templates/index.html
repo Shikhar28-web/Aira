@@ -17,6 +17,7 @@
       <span class="brand-name" data-i18n="appName">Apna Saathi</span>
     </div>
     <div class="topbar-actions">
+      <button class="pill-btn" id="logoutNavBtn" title="Logout">Logout</button>
       <!-- UI Language switcher -->
       <div class="lang-dropdown">
         <button class="pill-btn lang-btn" onclick="toggleLangDropdown()" title="Change Language">
@@ -133,7 +134,7 @@
           Create custom AI personas and have natural conversations in Hindi, English, or 10+ Indian languages.
         </p>
         <div class="hero-buttons">
-          <button class="btn-primary hero-cta" onclick="showScreen('setupScreen')">
+          <button class="btn-primary hero-cta" onclick="handleGetStarted()">
             <span data-i18n="landing_cta">Get Started</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
           </button>
@@ -272,7 +273,7 @@
       <div class="cta-content">
         <h2 data-i18n="landing_cta2">Ready to Get Started?</h2>
         <p data-i18n="landing_cta2_sub">Create your first AI persona and start chatting today.</p>
-        <button class="btn-primary cta-btn" onclick="showScreen('setupScreen')">
+        <button class="btn-primary cta-btn" onclick="handleGetStarted()">
           <span data-i18n="landing_begin">Begin Now</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
@@ -422,49 +423,107 @@
   ═══════════════════════════════ -->
   <section class="screen" id="chatScreen">
 
-    <div class="chat-header">
-      <div class="chat-avatar" id="chatAvatar">?</div>
-      <div class="chat-identity">
-        <h3 id="chatName">—</h3>
-        <p id="chatRelation" class="chat-status">
-          <span class="status-dot"></span>
-          <span data-i18n="online">Available</span>
-        </p>
-      </div>
-      <div class="chat-header-right">
-        <span class="clone-badge" id="cloneStatusBadge" style="display:none">Voice clone off</span>
-        <span class="lang-badge" id="chatLangBadge">HI</span>
-        <button class="icon-toggle small" onclick="resetProfile()" title="New Profile">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
-          </svg>
-        </button>
-      </div>
-    </div>
+    <div class="app-container">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <button class="btn-primary sidebar-new-chat" id="newChatBtn">New Chat</button>
+          <div class="sidebar-manage-row">
+            <button class="btn-ghost sidebar-manage-btn" id="editCompanionBtn" type="button">Edit</button>
+            <button class="btn-ghost sidebar-manage-btn danger" id="deleteCompanionBtn" type="button">Delete</button>
+          </div>
+        </div>
+        <div class="history-list" id="historyList">
+          <!-- history items injected dynamically -->
+        </div>
+      </aside>
 
-    <div class="messages-area" id="messagesArea">
-      <!-- messages injected dynamically -->
-    </div>
+      <div class="chat-area">
+        <div class="chat-header">
+          <div class="chat-avatar" id="chatAvatar">?</div>
+          <div class="chat-identity">
+            <h3 id="chatName">—</h3>
+            <p id="chatRelation" class="chat-status">
+              <span class="status-dot"></span>
+              <span data-i18n="online">Available</span>
+            </p>
+          </div>
+          <div class="chat-header-right">
+            <span class="clone-badge" id="cloneStatusBadge" style="display:none">Voice clone off</span>
+            <span class="lang-badge" id="chatLangBadge">HI</span>
+            <button class="icon-toggle small" onclick="resetProfile()" title="New Profile">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
 
-    <div class="input-bar">
-      <button class="mic-btn" id="micBtn" onclick="toggleRecord()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
-          <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
-        </svg>
-      </button>
-      <div class="input-wrap">
-        <input type="text" id="chatInput" data-i18n-ph="ph_chat" placeholder="Unhe kuch kaho…"
-               onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendMessage(); }" />
+        <div class="messages-area" id="messagesArea">
+          <!-- messages injected dynamically -->
+        </div>
+
+        <div class="input-bar">
+          <button class="mic-btn" id="micBtn" onclick="toggleRecord()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+              <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
+            </svg>
+          </button>
+          <div class="input-wrap">
+            <input type="text" id="chatInput" data-i18n-ph="ph_chat" placeholder="Unhe kuch kaho…"
+                   onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendMessage(); }" />
+          </div>
+          <button class="send-btn" onclick="sendMessage()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
+            </svg>
+          </button>
+        </div>
       </div>
-      <button class="send-btn" onclick="sendMessage()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
-        </svg>
-      </button>
     </div>
 
   </section>
+
+  <div class="modal-backdrop" id="companionModalBackdrop" style="display:none">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="companionModalTitle">
+      <h3 id="companionModalTitle">Edit Companion</h3>
+
+      <label for="companionEditName">Name</label>
+      <input id="companionEditName" type="text" placeholder="Companion name" />
+
+      <label for="companionEditStyle">Style</label>
+      <select id="companionEditStyle">
+        <option value="casual">Casual</option>
+        <option value="formal">Formal</option>
+        <option value="supportive">Supportive</option>
+        <option value="motivational">Motivational</option>
+        <option value="fun">Fun</option>
+      </select>
+
+      <label for="companionEditLanguage">Language</label>
+      <select id="companionEditLanguage">
+        <option value="hinglish">Hinglish</option>
+        <option value="hindi">Hindi</option>
+        <option value="english">English</option>
+      </select>
+
+      <label for="companionEditVoiceType">Voice</label>
+      <select id="companionEditVoiceType">
+        <option value="female">Female</option>
+        <option value="male">Male</option>
+      </select>
+
+      <label for="companionEditAudio">Voice Sample (optional)</label>
+      <input id="companionEditAudio" type="file" accept="audio/*" />
+
+      <p class="error-msg" id="companionModalError" style="display:none"></p>
+
+      <div class="modal-actions">
+        <button class="btn-ghost" id="cancelCompanionEditBtn" type="button">Cancel</button>
+        <button class="btn-primary" id="saveCompanionEditBtn" type="button">Save Changes</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Toast -->
   <div id="toast" class="toast"></div>

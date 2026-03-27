@@ -15,7 +15,7 @@ import tempfile
 import subprocess
 from glob import glob
 
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify, render_template, send_from_directory, session
 from flask_cors import CORS
 
 # ── Make sure the backend package is importable ───────────────────────────────
@@ -24,15 +24,32 @@ if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
 from agents.listener_agent import ListenerAgent
-from agents.brain_agent    import BrainAgent, JARVIS_SYSTEM
+from agents.brain_agent    import BrainAgent, JARVIS_SYSTEM, hinglish_to_hindi
 from agents.action_agent   import ActionAgent
 from agents.voice_agent    import VoiceAgent
 from agents.wake_agent     import WakeAgent
+from auth import auth_bp
+from db import (
+    init_db,
+    save_message,
+    get_chat_history,
+    create_conversation,
+    get_conversations,
+    get_messages,
+    get_companions,
+    create_companion,
+    get_companion_by_id,
+    update_companion,
+    delete_companion,
+    get_messages_by_companion,
+    get_companion_profile,
+    upsert_companion_profile,
+)
 
 # ── Config from environment (all optional — sensible defaults) ────────────────
 _DEVICE       = os.getenv("SARVSATHI_DEVICE",  "cpu")
 _WHISPER_MODEL = os.getenv("WHISPER_MODEL",    "medium")
-_OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL",     "qwen2.5:7b-instruct")
+_OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL",     "mistral")
 _OLLAMA_URL    = os.getenv("OLLAMA_URL",       "http://localhost:11434")
 _WAKE_ENABLED  = os.getenv("SARVSATHI_WAKE",   "true").lower() in {"1", "true", "yes"}
 _PROFILE_TRANSCRIBE = os.getenv("SARVSATHI_PROFILE_TRANSCRIBE", "false").lower() in {"1", "true", "yes"}
@@ -47,9 +64,6 @@ _wake     = WakeAgent() if _WAKE_ENABLED else None
 if _wake:
     _wake.start()
 
-# Warm-load XTTS in background so voice cloning becomes available sooner.
-threading.Thread(target=_voice._load_xtts_background, daemon=True).start()
-
 # ── Flask app ─────────────────────────────────────────────────────────────────
 _FRONTEND_DIR = os.path.join(_BACKEND_DIR, "..", "frontend")
 _PROFILE_VOICES_DIR = os.path.join(_BACKEND_DIR, "assets", "profile_voices")
@@ -60,6 +74,8 @@ app = Flask(
     template_folder=os.path.abspath(os.path.join(_FRONTEND_DIR, "templates")),
     static_folder=os.path.abspath(os.path.join(_FRONTEND_DIR, "static")),
 )
+app.config["SECRET_KEY"] = os.getenv("SARVSATHI_SECRET_KEY", "sarvsathi-dev-secret")
+app.register_blueprint(auth_bp)
 
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
@@ -72,6 +88,23 @@ def _strip_think(text: str) -> str:
         return text
     return re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip() or text
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PIPELINE COMMUNICATION
+# ─────────────────────────────────────────────────────────────────────────────
+# 
+# STEP 1: /api/chat
+#   Input: user message (text)
+#   Brain: Detects language, emotion, normalizes for LLM, generates response
+#   Output: reply (UI display), emotion, action
+#
+# STEP 2: Frontend sends reply text to /api/tts
+#   Input: text from reply (may be Roman Hinglish)
+#   Server: _prepare_text_for_tts() converts Roman→Devanagari if needed
+#   Voice: Receives normalized text, applies emotion prosody
+#   Output: Base64 audio
+#
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _resolve_tts_language_code(text: str, requested_lang: str) -> str:
     """
@@ -98,6 +131,32 @@ def _resolve_tts_language_code(text: str, requested_lang: str) -> str:
         return "en-IN"
 
     return req
+
+
+def _prepare_text_for_tts(text: str, requested_lang: str) -> str:
+    """
+    Server-side TTS text normalization (last-mile conversio).
+    
+    This is a SAFETY NET for cases where frontend sends Roman Hinglish
+    that needs Devanagari conversion for TTS. BrainAgent already handles
+    Script conversions, but since frontend may send text directly, we
+    keep this normalization as a backstop.
+    
+    NOTE: VoiceAgent._prepare_tts_text() handles PROSODY modulation
+    (emotion-based speed, punctuation). This function handles SCRIPT
+    conversion only.
+    """
+    txt = (text or "").strip()
+    if not txt:
+        return txt
+
+    req = (requested_lang or "").strip()
+    if req == "hi-IN" and not re.search(r"[\u0900-\u097F]", txt):
+        converted = hinglish_to_hindi(txt)
+        if converted and converted != txt:
+            print(f"[Server TTS] Roman->Devanagari: {txt[:40]}... -> {converted[:40]}...")
+            return converted
+    return txt
 
 
 def _convert_profile_audio_to_wav(audio_bytes: bytes) -> bytes | None:
@@ -162,6 +221,25 @@ def _convert_profile_audio_to_wav(audio_bytes: bytes) -> bytes | None:
                     pass
 
 
+def _sanitize_chat_messages(messages: list, max_messages: int = 12, max_chars: int = 420) -> list[dict]:
+    """Keep only recent user/assistant turns with bounded content size."""
+    if not isinstance(messages, list):
+        return []
+
+    out: list[dict] = []
+    for msg in messages[-max_messages:]:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        if role not in {"user", "assistant"}:
+            continue
+        content = str(msg.get("content", "")).strip()
+        if not content:
+            continue
+        out.append({"role": role, "content": content[:max_chars]})
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Serve Frontend
 # ─────────────────────────────────────────────────────────────────────────────
@@ -169,6 +247,16 @@ def _convert_profile_audio_to_wav(audio_bytes: bytes) -> bytes | None:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/login")
+def login_page():
+    return render_template("login.html")
+
+
+@app.route("/settings")
+def settings_page():
+    return render_template("settings.html")
 
 
 @app.route("/static/<path:filename>")
@@ -205,23 +293,374 @@ def wake_status():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# /api/companion  — companion profile (one per user)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/companion", methods=["GET", "POST"])
+def companion_profile():
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"ok": False, "error": "authentication required"}), 401
+
+        if request.method == "GET":
+            profile = get_companion_profile(user_id)
+            return jsonify({"ok": True, "companion": profile})
+
+        data = request.get_json(force=True) or {}
+        name = (data.get("name") or "").strip()
+        style = (data.get("style") or "casual").strip().lower()
+        language = (data.get("language") or "hinglish").strip().lower()
+
+        if not name:
+            return jsonify({"ok": False, "error": "name is required"}), 400
+        if style not in {"casual", "formal", "supportive", "motivational"}:
+            return jsonify({"ok": False, "error": "invalid style"}), 400
+
+        profile = upsert_companion_profile(
+            user_id=user_id,
+            name=name,
+            style=style,
+            language=language,
+        )
+        return jsonify({"ok": True, "companion": profile})
+    except Exception as e:
+        print(f"[COMPANION ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/companions", methods=["GET", "POST"])
+def companions():
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"ok": False, "error": "authentication required"}), 401
+
+        if request.method == "GET":
+            rows = get_companions(user_id)
+            return jsonify({"ok": True, "companions": [
+                {
+                    "id": c.get("id"),
+                    "name": c.get("name"),
+                    "style": c.get("style"),
+                    "language": c.get("language"),
+                    "voice_type": c.get("voice_type") or "female",
+                    "profile_voice_id": c.get("profile_voice_id"),
+                }
+                for c in rows
+            ]})
+
+        data = request.get_json(force=True) or {}
+        name = (data.get("name") or "").strip()
+        style = (data.get("style") or "casual").strip().lower()
+        language = (data.get("language") or "hinglish").strip().lower()
+        voice_type = (data.get("voice_type") or "female").strip().lower()
+        profile_voice_id = (data.get("profile_voice_id") or "").strip() or None
+
+        if not name:
+            return jsonify({"ok": False, "error": "name is required"}), 400
+        if style not in {"casual", "formal", "supportive", "motivational", "fun"}:
+            return jsonify({"ok": False, "error": "invalid style"}), 400
+        if voice_type not in {"female", "male"}:
+            return jsonify({"ok": False, "error": "invalid voice_type"}), 400
+
+        profile = create_companion(
+            user_id=user_id,
+            name=name,
+            style=style,
+            language=language,
+            voice_type=voice_type,
+            profile_voice_id=profile_voice_id,
+        )
+        return jsonify({
+            "ok": True,
+            "companion": {
+                "id": profile.get("id"),
+                "name": profile.get("name"),
+                "style": profile.get("style"),
+                "language": profile.get("language"),
+                "voice_type": profile.get("voice_type") or "female",
+                "profile_voice_id": profile.get("profile_voice_id"),
+            },
+        }), 201
+    except Exception as e:
+        print(f"[COMPANIONS ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/companions/<int:companion_id>", methods=["PUT", "DELETE"])
+def companion_by_id(companion_id: int):
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"ok": False, "error": "authentication required"}), 401
+
+        existing = get_companion_by_id(user_id, companion_id)
+        if not existing:
+            return jsonify({"ok": False, "error": "companion not found"}), 404
+
+        if request.method == "DELETE":
+            ok = delete_companion(user_id, companion_id)
+            return jsonify({"ok": bool(ok)})
+
+        data = request.get_json(force=True) or {}
+        name = (data.get("name") or "").strip()
+        style = (data.get("style") or existing.get("style") or "casual").strip().lower()
+        language = (data.get("language") or existing.get("language") or "hinglish").strip().lower()
+        voice_type = (data.get("voice_type") or existing.get("voice_type") or "female").strip().lower()
+        profile_voice_id = data.get("profile_voice_id", existing.get("profile_voice_id"))
+        profile_voice_id = (profile_voice_id or "").strip() or None
+
+        if not name:
+            return jsonify({"ok": False, "error": "name is required"}), 400
+        if style not in {"casual", "formal", "supportive", "motivational", "fun"}:
+            return jsonify({"ok": False, "error": "invalid style"}), 400
+        if voice_type not in {"female", "male"}:
+            return jsonify({"ok": False, "error": "invalid voice_type"}), 400
+
+        row = update_companion(
+            user_id=user_id,
+            companion_id=companion_id,
+            name=name,
+            style=style,
+            language=language,
+            voice_type=voice_type,
+            profile_voice_id=profile_voice_id,
+        )
+        return jsonify({"ok": True, "companion": row})
+    except Exception as e:
+        print(f"[COMPANION BY ID ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/companions/<int:companion_id>/voice", methods=["POST"])
+def companion_voice_upload(companion_id: int):
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"ok": False, "error": "authentication required"}), 401
+
+        existing = get_companion_by_id(user_id, companion_id)
+        if not existing:
+            return jsonify({"ok": False, "error": "companion not found"}), 404
+
+        if "audio" not in request.files:
+            return jsonify({"ok": False, "error": "No file"}), 400
+
+        audio_file = request.files["audio"]
+        lang = request.form.get("language_code", "hi-IN")
+        audio_bytes = audio_file.read()
+
+        normalized_wav = _convert_profile_audio_to_wav(audio_bytes)
+        audio_to_store = normalized_wav or audio_bytes
+        stored_ext = ".wav" if normalized_wav else ".bin"
+
+        profile_voice_id = uuid.uuid4().hex
+        save_path = os.path.join(_PROFILE_VOICES_DIR, f"{profile_voice_id}{stored_ext}")
+        with open(save_path, "wb") as fh:
+            fh.write(audio_to_store)
+
+        transcript = ""
+        warning = None
+        if _PROFILE_TRANSCRIBE:
+            try:
+                result = _listener.transcribe(audio_bytes, language_code=lang)
+                transcript = result.get("user_text", "")
+            except Exception as stt_exc:
+                warning = f"profile transcription unavailable: {stt_exc}"
+                print(f"[COMPANION VOICE STT WARN] {stt_exc}")
+        else:
+            warning = "profile transcription skipped (SARVSATHI_PROFILE_TRANSCRIBE=false)"
+
+        row = update_companion(
+            user_id=user_id,
+            companion_id=companion_id,
+            name=existing.get("name") or "Companion",
+            style=existing.get("style") or "casual",
+            language=existing.get("language") or "hinglish",
+            voice_type=existing.get("voice_type") or "female",
+            profile_voice_id=profile_voice_id,
+        )
+        return jsonify({
+            "ok": True,
+            "companion": row,
+            "transcript": transcript,
+            "profile_voice_id": profile_voice_id,
+            "warning": warning,
+        })
+    except Exception as e:
+        print(f"[COMPANION VOICE ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/conversations  — list and create chat threads
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/conversations", methods=["GET"])
+def conversations_list():
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"ok": False, "error": "authentication required"}), 401
+        rows = get_conversations(user_id)
+        return jsonify({"ok": True, "conversations": [{"id": r["id"], "title": r["title"]} for r in rows]})
+    except Exception as e:
+        print(f"[CONVERSATIONS ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/conversations/new", methods=["POST"])
+def conversations_new():
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"ok": False, "error": "authentication required"}), 401
+        data = request.get_json(force=True) or {}
+        title = (data.get("title") or "New Chat").strip() or "New Chat"
+        conversation_id = create_conversation(user_id, title)
+        return jsonify({"ok": True, "conversation_id": conversation_id, "title": title})
+    except Exception as e:
+        print(f"[CONVERSATION NEW ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/messages/<int:companion_id>", methods=["GET"])
+def companion_messages(companion_id: int):
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"ok": False, "error": "authentication required"}), 401
+
+        if not any(c.get("id") == companion_id for c in get_companions(user_id)):
+            return jsonify({"ok": False, "error": "invalid companion for user"}), 403
+
+        messages = get_messages_by_companion(user_id, companion_id)
+        return jsonify({"ok": True, "messages": messages})
+    except Exception as e:
+        print(f"[MESSAGES ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # /api/chat  — LLM (Ollama / Mistral, fully offline)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
+    """
+    Chat endpoint — Main entry to the brain pipeline.
+    
+    REQUEST:
+    {
+        "messages": [
+            {"role": "user", "content": "User message"},
+            ...history...
+        ],
+        "system": "Custom system prompt (optional)"
+    }
+    
+    PIPELINE (in BrainAgent.think()):
+    1. Receive text
+    2. Detect language (Hindi/Hinglish/English)
+    3. Normalize for LLM (Rom→Deva if Hinglish)
+    4. Detect emotion
+    5. SAFETY CHECK (suicide prevention)
+    6. Action detection + Deterministic paths
+    7. LLM call (if no match)
+    8. Response handling + Format preservation
+    9. Return structured response
+    
+    RESPONSE:
+    {
+        "ok": true,
+        "reply": "User-visible response text",
+        "action": "system_command_or_null"
+    }
+    """
     try:
         data          = request.get_json(force=True) or {}
         system_prompt = data.get("system", JARVIS_SYSTEM)
-        messages      = data.get("messages", [])
+        messages      = _sanitize_chat_messages(data.get("messages", []))
 
+        # New simple payload support: { companion_id, message }
+        direct_message = (data.get("message") or "").strip()
+
+        # Fallback to legacy payload support using messages array.
+        user_idx = -1
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                user_idx = i
+                break
+
+        if direct_message:
+            user_text = direct_message
+            history = []
+        else:
+            if user_idx < 0:
+                return jsonify({"ok": False, "error": "No user message provided"}), 400
+            user_text = messages[user_idx]["content"]
+            history = messages[:user_idx]
+
+        companion_id_raw = data.get("companion_id")
+        try:
+            companion_id = int(companion_id_raw) if companion_id_raw not in {None, "", "null"} else None
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "invalid companion_id"}), 400
+        user_id = session.get("user_id")
+
+        if user_id and not companion_id:
+            return jsonify({"ok": False, "error": "companion_id is required"}), 400
+
+        selected_companion = None
+        if user_id and companion_id:
+            companions = get_companions(user_id)
+            for c in companions:
+                if c.get("id") == companion_id:
+                    selected_companion = c
+                    break
+            if not selected_companion:
+                return jsonify({"ok": False, "error": "invalid companion for user"}), 403
+
+        # If selected companion exists, inject persona into system prompt.
+        if selected_companion:
+            companion_name = (selected_companion.get("name") or "Companion").strip()
+            companion_style = (selected_companion.get("style") or "casual").strip()
+            preferred_language = (selected_companion.get("language") or "hinglish").strip()
+            system_prompt = (
+                f"{system_prompt}\n\n"
+                f"You are {companion_name}, a {companion_style} AI companion. "
+                f"Preferred language: {preferred_language}."
+            )
+
+        # Call brain agent with structured pipeline
         result = _brain.think(
-            user_text=messages[-1]["content"] if messages else "",
+            user_text=user_text,
             system_prompt=system_prompt,
-            history=messages[:-1],
+            history=history,
+            user_id=user_id,
+            companion_id=companion_id,
         )
 
         reply = _strip_think(result.get("response", ""))
+        emotion = result.get("emotion", "neutral")
+
+        # Persist user + assistant turns when an authenticated user exists.
+        if user_id:
+            save_message(
+                user_id=user_id,
+                companion_id=companion_id,
+                role="user",
+                message=user_text,
+                emotion=emotion,
+            )
+            save_message(
+                user_id=user_id,
+                companion_id=companion_id,
+                role="assistant",
+                message=reply,
+                emotion=emotion,
+            )
 
         # Fire OS action in a background thread (non-blocking)
         action = result.get("action")
@@ -238,28 +677,87 @@ def chat():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# /api/history  — Last 20 chat messages for current user + companion
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/api/history", methods=["GET"])
+def history():
+    try:
+        user_id = session.get("user_id")
+        if not user_id:
+            return jsonify({"ok": False, "error": "authentication required"}), 401
+
+        companion_id_raw = request.args.get("companion_id")
+        companion_id = int(companion_id_raw) if companion_id_raw not in {None, "", "null"} else None
+
+        messages = get_chat_history(user_id=user_id, companion_id=companion_id)
+        return jsonify({"ok": True, "messages": messages[-20:]})
+    except ValueError:
+        return jsonify({"ok": False, "error": "invalid companion_id"}), 400
+    except Exception as e:
+        print(f"[HISTORY ERROR] {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # /api/tts  — Text to Speech (Coqui XTTS v2, fully offline)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/api/tts", methods=["POST"])
 def tts():
+    """
+    Text-to-speech synthesis endpoint.
+    
+    REQUEST:
+    {
+        "text": "Response text",
+        "language_code": "hi-IN" (optional, default hi-IN),
+        "emotion": "neutral" (optional: sadness, fear, anger, joy, neutral),
+        "profile_voice_id": "custom_voice_id" (optional)
+    }
+    
+    PROCESS:
+    1. Normalize text script (Roman→Devanagari if needed)
+    2. Resolve TTS language (for proper XTTS pronunciation)
+    3. Synthesize with emotion-aware prosody
+    4. Return Base64 audio
+    
+    RESPONSE:
+    {
+        "ok": true,
+        "audio": "base64_wav",
+        "voice_cloned": bool,
+        "tts_language_used": "hi-IN"
+    }
+    """
     try:
         data = request.get_json(force=True) or {}
-        text = (data.get("text", "") or "")[:500]
+        text = (data.get("text", "") or "")[:500]  # Cap at 500 chars
         lang = data.get("language_code", "hi-IN")
+        emotion = data.get("emotion", "neutral")
+        speaker = (data.get("speaker") or "").strip()
         profile_voice_id = (data.get("profile_voice_id") or "").strip()
-        resolved_lang = _resolve_tts_language_code(text, lang)
 
+        # Normalize text (script conversion if needed)
+        tts_text = _prepare_text_for_tts(text, lang)
+        
+        # Resolve best TTS language for pronunciation
+        resolved_lang = _resolve_tts_language_code(tts_text, lang)
+        
+        # Load custom voice if provided
         speaker_wav = None
         if profile_voice_id:
             matches = glob(os.path.join(_PROFILE_VOICES_DIR, f"{profile_voice_id}.*"))
             if matches:
                 speaker_wav = matches[0]
 
+        # Synthesize with emotion-aware prosody
         audio_b64, cloned = _voice.synthesize(
-            text,
+            tts_text,
             language_code=resolved_lang,
+            speaker=speaker,
             speaker_wav=speaker_wav,
+            emotion=emotion,
         )
         if not audio_b64:
             return jsonify({"ok": False, "error": "TTS returned no audio"}), 500
@@ -371,6 +869,8 @@ def action():
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    init_db()
+
     host  = os.getenv("APP_HOST", "127.0.0.1")
     port  = int(os.getenv("APP_PORT", "5000"))
     debug = os.getenv("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}

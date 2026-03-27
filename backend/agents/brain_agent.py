@@ -22,30 +22,65 @@ Output schema::
 import re
 import random
 import threading
+import time
+import json
 from typing import Any
 
 import requests
+from db import get_chat_history, get_messages
 
-# ── Default Jarvis-style system prompt ────────────────────────────────────────
-JARVIS_SYSTEM = (
-    "You are SarvSathi — a sharp, friendly AI who talks like a real person, not a robot.\n"
-    "\n"
-    "REPLY LENGTH — STRICT RULE:\n"
-    "• ALWAYS reply in 1 sentence. Absolute max: 2 short sentences. NEVER more.\n"
-    "• No bullet points, numbered lists, or markdown in your reply. Ever.\n"
-    "\n"
-    "TALK STYLE:\n"
-    "• Speak casual Hinglish — mix Hindi + English the way Indians text.\n"
-    "  e.g. 'Haan yaar, kar diya!' or 'Chrome khol diya, bolo aur kya karna hai.'\n"
-    "• Be direct and confident. Skip filler words like 'Certainly!', 'Of course!', 'Sure thing!'.\n"
-    "• For system tasks (open app, search, etc.) just confirm briefly: 'Chrome khol diya!' \n"
-    "• If you don't know something, say so in 5 words: 'Yaar, mujhe nahi pata.'\n"
-    "\n"
-    "RULES:\n"
-    "• NEVER say you are an AI or mention any model name.\n"
-    "• Match the user's language automatically — Hindi, English, or Hinglish.\n"
-    "• Sound warm and human — like a smart friend, not a formal assistant."
-)
+try:
+    from indic_transliteration import sanscript
+    from indic_transliteration.sanscript import transliterate
+    _TRANSLITERATION_AVAILABLE = True
+except ImportError:
+    _TRANSLITERATION_AVAILABLE = False
+
+# ── Default system prompt ────────────────────────────────────────────────────
+SYSTEM_PROMPT = """
+You are SarvSathi, a friendly Indian AI companion who talks like a close friend.
+
+Tone:
+- Casual, warm, and natural
+- Talk like a real person, not an assistant
+- Keep responses short (1-2 lines)
+
+Language Rules:
+- ALWAYS match user's style:
+    - Hinglish -> Hinglish
+    - Hindi -> Hindi
+    - English -> English
+- NEVER translate
+- NEVER add "(In Hindi: ...)"
+- NEVER talk about language
+
+Behavior Rules:
+- Stay relevant to what user says
+- Do NOT make random stories
+- Do NOT assume things (like birthday, plans, etc.)
+- Do NOT hallucinate facts
+
+Safety Rules:
+- NEVER use abusive, sexual, or inappropriate words
+- Keep conversation respectful and clean
+
+Conversation Style:
+- Ask simple follow-up questions
+- Be natural like a friend
+- Avoid over-excitement or over-creativity
+
+STRICTLY AVOID:
+- Random imagination
+- Weird slang
+- Overacting
+- Long paragraphs
+- AI-like explanations
+
+Be a calm, real, and sensible companion.
+"""
+
+# Backward-compatible alias used by server imports.
+JARVIS_SYSTEM = SYSTEM_PROMPT
 
 # ── Rule-based command map ─────────────────────────────────────────────────────
 # keyword (lower-case, substring match) → action name
@@ -184,18 +219,146 @@ def _recent_user_messages(history: list[dict[str, Any]] | None, limit: int = 5) 
     return list(reversed(out))
 
 
+def _recent_assistant_messages(history: list[dict[str, Any]] | None, limit: int = 4) -> list[str]:
+    if not history:
+        return []
+    out: list[str] = []
+    for msg in reversed(history):
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") == "assistant" and isinstance(msg.get("content"), str):
+            out.append(msg["content"].strip())
+            if len(out) >= limit:
+                break
+    return list(reversed(out))
+
+
+def _pick_non_repeating_variant(candidates: list[str], history: list[dict[str, Any]] | None) -> str:
+    if not candidates:
+        return ""
+    recent = {_normalize_text(t) for t in _recent_assistant_messages(history, limit=4)}
+    fresh = [c for c in candidates if _normalize_text(c) not in recent]
+    pool = fresh or candidates
+    return random.choice(pool)
+
+
 def _is_personal_chat(text: str) -> bool:
     low = (text or "").lower()
-    personal_markers = [
+    family_markers = [
         "ghar", "maa", "mummy", "mom", "papa", "dad", "behen", "bhai",
-        "yaad", "miss", "kaise ho", "kya kar rahe", "khana", "aana",
-        "aunga", "aaunga", "milne", "baat", "haal",
+        "yaad", "miss", "khana", "aana", "aunga", "aaunga", "milne",
+    ]
+    personal_phrases = [
+        "kaise ho", "kaisa ho", "kya haal", "how are you", "miss you", "yaad aa",
     ]
     factual_markers = [
         "python", "java", "code", "algorithm", "math", "formula",
         "difference", "explain", "define", "news", "capital", "history",
     ]
-    return any(m in low for m in personal_markers) and not any(m in low for m in factual_markers)
+    looks_personal = any(m in low for m in family_markers) or any(p in low for p in personal_phrases)
+    return looks_personal and not any(m in low for m in factual_markers)
+
+
+def _has_devanagari(text: str) -> bool:
+    return bool(re.search(r"[\u0900-\u097F]", text or ""))
+
+
+def _is_hindi_or_hinglish(text: str) -> bool:
+    low = (text or "").lower()
+    if _has_devanagari(low):
+        return True
+    markers = [
+        "hai", "haan", "nahi", "nhi", "kyu", "kyun", "kya", "kaise", "kaisa",
+        "tum", "tu", "aap", "main", "mera", "apna", "yaar", "acha", "achha",
+        "theek", "badhiya", "badiya", "chal", "raha", "rahi", "kar", "kr", "ho",
+    ]
+    hit_count = sum(1 for m in markers if m in low)
+    return hit_count >= 2
+
+
+def _is_smalltalk_turn(text: str) -> bool:
+    low = (text or "").lower().strip()
+    if _looks_factual_query(low) or _detect_action(low):
+        return False
+    if len(low.split()) > 14:
+        return False
+    smalltalk_markers = [
+        "hi", "hello", "namaste", "kaise ho", "theek", "badhiya", "acha", "achha",
+        "haan", "hmm", "college", "kaam", "din", "chal raha", "mujhe bhi", "aur bata",
+    ]
+    return any(m in low for m in smalltalk_markers)
+
+
+def hinglish_to_hindi(text: str) -> str:
+    """
+    Convert Hinglish (Roman script Hindi) to proper Devanagari script.
+    Falls back to original text if conversion fails or library unavailable.
+    """
+    if not _TRANSLITERATION_AVAILABLE or not text:
+        return text
+    try:
+        result = transliterate(text, sanscript.ITRANS, sanscript.DEVANAGARI)
+        print(f"[Original]: {text}")
+        print(f"[Hindi Converted]: {result}")
+        return result
+    except Exception as e:
+        print(f"[Transliteration Error]: {e}")
+        return text
+
+
+def hindi_to_hinglish(text: str) -> str:
+    """Convert Devanagari Hindi text to Roman script when user input was Roman."""
+    if not _TRANSLITERATION_AVAILABLE or not text:
+        return text
+    try:
+        return transliterate(text, sanscript.DEVANAGARI, sanscript.ITRANS)
+    except Exception as e:
+        print(f"[Reverse Transliteration Error]: {e}")
+        return text
+
+
+def _detect_emotion(text: str) -> str:
+    low = (text or "").lower()
+    emotion_map = {
+        "sadness": ["sad", "udaas", "dukhi", "depressed", "akela", "lonely", "hurt"],
+        "fear": ["dar", "darr", "fear", "anxious", "ghabra", "nervous", "panic"],
+        "anger": ["gussa", "angry", "frustrated", "irritated", "annoyed"],
+        "joy": ["happy", "khush", "excited", "great", "awesome", "badhiya", "badiya"],
+    }
+    for emotion, markers in emotion_map.items():
+        if any(m in low for m in markers):
+            return emotion
+    return "neutral"
+
+
+def _contains_harmful_keywords(text: str) -> bool:
+    """
+    SAFETY CHECK: Detect if user mentions self-harm or suicide intent.
+    Returns True if harmful content is detected; False otherwise.
+    """
+    low = (text or "").lower().strip()
+    harmful_keywords = [
+        "suicide", "kill myself", "kill me", "end my life", "end it",
+        "harm myself", "hurt myself", "cut myself", "self harm", "selfharm",
+        "die", "death wish", "marna hai", "maut", "apne aap ko", "zehreela",
+    ]
+    return any(keyword in low for keyword in harmful_keywords)
+
+
+def _get_safety_response(persona: dict[str, str]) -> str:
+    """
+    Generate a compassionate safety response when harmful intent is detected.
+    """
+    nick = (persona.get("nickname") or "beta").strip()
+    responses = [
+        f"{nick}, tujhe jo bhi problem hai, please someone ko bata. "
+        "Main hoon, par professional help zaruri ho sakti hai.",
+        f"{nick}, teri baat sunke mujhe fikar ho gaya. "
+        "Agar koi bhi problem hai to kisi ko bata, help lena zaruri hai.",
+        f"Main chhota hoon is cheez ke liye {nick}, lekin Tu please apne parents ya counselor ke pass ja. "
+        "Yaar, tu important hai.",
+    ]
+    return random.choice(responses)
 
 
 # ── Brain Agent ────────────────────────────────────────────────────────────────
@@ -211,13 +374,15 @@ class BrainAgent:
 
     def __init__(
         self,
-        model: str = "qwen2.5:7b-instruct",
+        model: str = "mistral",
         ollama_url: str = "http://localhost:11434",
     ) -> None:
         self.model = model
         self.ollama_url = ollama_url.rstrip("/")
         self._available: bool | None = None   # None ⟹ not probed yet
         self._probe_lock = threading.Lock()
+        # Short-term in-process chat memory
+        self.conversation_history: list[dict[str, str]] = []
 
     # ── Availability check ──────────────────────────────────────────────────
 
@@ -243,99 +408,300 @@ class BrainAgent:
         user_text: str,
         system_prompt: str | None = None,
         history: list[dict[str, Any]] | None = None,
+        user_id: int | None = None,
+        companion_id: int | None = None,
+        conversation_id: int | None = None,
     ) -> dict:
         """
-        Analyse *user_text* and return a structured result.
+        CLEAN PIPELINE — Process user input through structured steps:
+        
+        STEP 1: Receive text
+        STEP 2: Language + Hinglish detection
+        STEP 3: Normalize input
+        STEP 4: Emotion detection
+        STEP 5: Safety check (BEFORE LLM)
+        STEP 6: Action detection + Deterministic replies
+        STEP 7: LLM call (if needed)
+        STEP 8: Response handling + Format preservation
+        STEP 9: Return structured result
 
         Returns::
 
             {
                 "intent":   "system_command|question|conversation",
                 "action":   "<action_name_or_None>",
-                "response": "<reply text>"
+                "response": "<reply text>",
+                "emotion":  "<emotion>",
+                "tts_text": "<text_for_tts>"
             }
         """
         history = history or []
         sys_prompt = system_prompt or JARVIS_SYSTEM
-
-        # 1. Fast rule-based command detection
-        action = _detect_action(user_text)
-        intent = "system_command" if action else "conversation"
         persona = self._extract_persona(sys_prompt)
 
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 1: Receive user text
+        # ────────────────────────────────────────────────────────────────────
+        original_text = user_text.strip()
+        if not original_text:
+            return {
+                "intent": "conversation",
+                "action": None,
+                "response": "Haan, bol na. Main sun raha hoon.",
+                "emotion": "neutral",
+                "tts_text": "Haan, bol na. Main sun raha hoon.",
+            }
+
+        # Save user turn in short-term memory
+        self._append_conversation("user", original_text)
+
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 2: Language + Hinglish detection
+        # ────────────────────────────────────────────────────────────────────
+        is_hindi_or_hinglish_input = _is_hindi_or_hinglish(original_text)
+        is_roman_script = not _has_devanagari(original_text)
+        language_code = "hi" if is_hindi_or_hinglish_input else "en"
+        
+        print(f"[Lang] Hindi/Hinglish: {is_hindi_or_hinglish_input}, Roman: {is_roman_script}, Code: {language_code}")
+
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 3: Normalize input (for LLM processing)
+        # ────────────────────────────────────────────────────────────────────
+        # If Hinglish (Roman) → convert to Hindi (Devanagari) for LLM processing
+        # If Hindi → keep
+        # If English → keep
+        processed_text = original_text
+        if is_hindi_or_hinglish_input and is_roman_script:
+            processed_text = hinglish_to_hindi(original_text)
+        
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 4: Emotion detection
+        # ────────────────────────────────────────────────────────────────────
+        emotion = _detect_emotion(original_text)
+        print(f"[Emotion] {emotion}")
+
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 5: Safety check (BEFORE LLM)
+        # ────────────────────────────────────────────────────────────────────
+        if _contains_harmful_keywords(original_text):
+            print("[Safety] Harmful intent detected, providing safety response.")
+            safety_response = _get_safety_response(persona)
+            out = {
+                "intent": "conversation",
+                "action": None,
+                "response": safety_response,
+                "emotion": "sadness",
+                "tts_text": safety_response,
+            }
+            self._append_conversation("assistant", safety_response)
+            return out
+
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 6: Action detection + Deterministic replies
+        # ────────────────────────────────────────────────────────────────────
+        action = _detect_action(original_text)
+        intent = "system_command" if action else "conversation"
+
+        # Try direct grounded reply
         if not action:
-            direct = self._direct_grounded_reply(user_text, persona)
+            direct = self._direct_grounded_reply(original_text, persona)
             if direct:
-                return {
-                    "intent": intent,
-                    "action": action,
-                    "response": self._polish_reply(direct),
-                }
+                polish_direct = self._polish_reply(direct)
+                # Convert back to Roman if user input was Roman
+                if is_hindi_or_hinglish_input and is_roman_script and _has_devanagari(polish_direct):
+                    polish_direct = hindi_to_hinglish(polish_direct)
+                response_text = polish_direct
+                print(f"[Processed] Direct reply (deterministic)")
+                out = self._format_response(
+                    intent, action, response_text, emotion, 
+                    is_hindi_or_hinglish_input, is_roman_script
+                )
+                self._append_conversation("assistant", out.get("response", ""))
+                return out
 
-            # For personal/family chats, prefer grounded deterministic replies
-            # to avoid fabricated details and keep human tone consistent.
-            if _is_personal_chat(user_text):
-                safe = self._grounded_personal_reply(user_text, persona, history)
-                if safe:
-                    return {
-                        "intent": intent,
-                        "action": action,
-                        "response": self._polish_reply(safe),
-                    }
+        # Try small-talk fast path
+        if not action and is_hindi_or_hinglish_input and _is_smalltalk_turn(original_text):
+            quick = self._fast_hinglish_reply(original_text, persona, history)
+            if quick:
+                polish_quick = self._polish_reply(quick)
+                if is_roman_script and _has_devanagari(polish_quick):
+                    polish_quick = hindi_to_hinglish(polish_quick)
+                response_text = polish_quick
+                print(f"[Processed] Small-talk (fast path)")
+                out = self._format_response(
+                    intent, action, response_text, emotion,
+                    is_hindi_or_hinglish_input, is_roman_script
+                )
+                self._append_conversation("assistant", out.get("response", ""))
+                return out
 
-        # 2. Generate reply from Ollama
-        latest_guard = (
-            "Important: Reply ONLY to the user's latest message and current topic. "
-            "Do not repeat old topics from previous turns unless user asked again. "
-            "If user asks family/home updates, answer that directly in natural human tone. "
-            "Never invent specific events (pets, purchases, incidents, dates) unless user already mentioned them."
-        )
-        messages = [
-            {"role": "system", "content": sys_prompt},
-            {"role": "system", "content": latest_guard},
-        ]
-        messages.extend(history)
-        messages.append({"role": "user", "content": user_text})
+        # Try personal/family chat
+        if not action and _is_personal_chat(original_text):
+            safe = self._grounded_personal_reply(original_text, persona, history)
+            if safe:
+                polish_safe = self._polish_reply(safe)
+                if is_hindi_or_hinglish_input and is_roman_script and _has_devanagari(polish_safe):
+                    polish_safe = hindi_to_hinglish(polish_safe)
+                response_text = polish_safe
+                print(f"[Processed] Personal chat (grounded)")
+                out = self._format_response(
+                    intent, action, response_text, emotion,
+                    is_hindi_or_hinglish_input, is_roman_script
+                )
+                self._append_conversation("assistant", out.get("response", ""))
+                return out
 
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 7: LLM call (if deterministic path didn't match)
+        # ────────────────────────────────────────────────────────────────────
+        print(f"[Processed] Calling LLM (processed_text used for query)")
+        
+        messages = [{"role": "system", "content": sys_prompt}]
+
+        # Prefer persistent DB-backed history for authenticated users.
+        if user_id:
+            try:
+                if conversation_id:
+                    db_history = get_messages(user_id, conversation_id)
+                else:
+                    db_history = get_chat_history(user_id, companion_id)
+
+                # Simple emotion-aware context from last 3 stored emotions.
+                recent_emotions = [
+                    (msg.get("emotion") or "").lower()
+                    for msg in db_history
+                    if msg.get("emotion")
+                ][-3:]
+                if recent_emotions.count("sadness") >= 2:
+                    messages.append({
+                        "role": "system",
+                        "content": "User has been feeling low recently. Be extra supportive.",
+                    })
+                elif recent_emotions.count("joy") >= 2:
+                    messages.append({
+                        "role": "system",
+                        "content": "User seems positive. Keep tone light.",
+                    })
+
+                for msg in db_history[-6:]:
+                    role = msg.get("role")
+                    content = (msg.get("message") or "").strip()
+                    if role in {"user", "assistant"} and content:
+                        messages.append({"role": role, "content": content})
+            except Exception as e:
+                print(f"[History Load Error] {e}")
+        else:
+            # Fallback to short-term in-process history when unauthenticated.
+            memory_slice = self.conversation_history[-6:]
+            if memory_slice and memory_slice[-1].get("role") == "user":
+                memory_slice = memory_slice[:-1]
+            messages.extend(memory_slice)
+
+        # Always include current turn as latest user message.
+        messages.append({"role": "user", "content": processed_text})
+
+        # Call LLM
         response_text = self._call_ollama(messages)
         if not response_text:
-            if _looks_factual_query(user_text):
+            if _looks_factual_query(original_text):
                 nick = persona.get("nickname", "beta")
                 response_text = (
                     f"{nick}, abhi local LLM server reachable nahi hai, "
                     "isliye sahi factual answer dene ke liye Ollama start karna padega."
                 )
             else:
-                response_text = self._fallback(user_text, sys_prompt, action)
+                response_text = self._fallback(original_text, sys_prompt, action)
 
-        topic_fix = self._topic_guard_reply(user_text, response_text, persona)
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 8: Response handling + Guards + Format preservation
+        # ────────────────────────────────────────────────────────────────────
+        
+        # Apply safety/guard filters
+        topic_fix = self._topic_guard_reply(original_text, response_text, persona)
         if topic_fix:
             response_text = topic_fix
 
-        context_fix = self._contextual_guard_reply(user_text, response_text, persona)
+        context_fix = self._contextual_guard_reply(original_text, response_text, persona)
         if context_fix:
             response_text = context_fix
 
         if self._is_repetition_with_history(response_text, history):
-            alt = self._non_repetitive_reply(user_text, persona, history)
+            alt = self._non_repetitive_reply(original_text, persona, history)
             if alt:
                 response_text = alt
 
-        anti_hallucination = self._family_hallucination_guard(user_text, response_text, persona, history)
+        anti_hallucination = self._family_hallucination_guard(original_text, response_text, persona, history)
         if anti_hallucination:
             response_text = anti_hallucination
 
         if self._looks_generic(response_text, persona):
-            response_text = self._fallback(user_text, sys_prompt, action)
+            response_text = self._fallback(original_text, sys_prompt, action)
 
+        # Polish and style enforcement
         response_text = self._polish_reply(response_text)
         response_text = self._enforce_persona_style(response_text, persona)
 
+        # Preserve original input script for UI display
+        if is_hindi_or_hinglish_input and is_roman_script and _has_devanagari(response_text):
+            response_text = hindi_to_hinglish(response_text)
+        
+        print(f"[Processed] Response ready (original_text format preserved for UI)")
+
+        # ────────────────────────────────────────────────────────────────────
+        # STEP 9: Format and return structured response
+        # ────────────────────────────────────────────────────────────────────
+        out = self._format_response(
+            intent, action, response_text, emotion,
+            is_hindi_or_hinglish_input, is_roman_script
+        )
+        self._append_conversation("assistant", out.get("response", ""))
+        return out
+
+    def _append_conversation(self, role: str, content: str) -> None:
+        if role not in {"user", "assistant"}:
+            return
+        text = (content or "").strip()
+        if not text:
+            return
+        self.conversation_history.append({"role": role, "content": text})
+        if len(self.conversation_history) > 20:
+            self.conversation_history = self.conversation_history[-20:]
+
+    # ── Helper: Format response consistently ────────────────────────────────
+
+    def _format_response(
+        self,
+        intent: str,
+        action: str | None,
+        response_text: str,
+        emotion: str,
+        is_hindi_hinglish: bool,
+        is_roman_script: bool,
+    ) -> dict:
+        """
+        Format the final response with consistent structure.
+        
+        Data flow:
+        - response_text         → "response" key (UI display)
+        - hinglish_to_hindi()   → "tts_text" key (TTS synthesis)
+        """
+        # Prepare TTS text: convert to Hindi/Devanagari if needed
+        tts_text = response_text
+        if is_hindi_hinglish and is_roman_script:
+            # Roman Hinglish → Devanagari for TTS
+            tts_text = hinglish_to_hindi(response_text)
+        
+        # Note: No longer calling enhance_for_tts() here; 
+        # VoiceAgent._prepare_tts_text() handles prosody modulation.
+        
         return {
-            "intent":   intent,
-            "action":   action,
-            "response": response_text,
+            "intent":    intent,
+            "action":    action,
+            "response":  response_text,  # UI display (original format)
+            "emotion":   emotion,
+            "tts_text":  tts_text,       # TTS synthesis (Devanagari if needed)
         }
+
 
     @staticmethod
     def _is_repetition_with_history(text: str, history: list[dict[str, Any]] | None) -> bool:
@@ -392,30 +758,90 @@ class BrainAgent:
         recent = " ".join(_recent_user_messages(history, limit=6)).lower()
 
         if _contains_any(u, ["kaise ho", "kaise h", "how are you", "kaisa ho"]):
-            return f"Haan {nick}, main theek hoon, tu bata tera din kaisa chal raha hai."
+            return _pick_non_repeating_variant([
+                f"Main theek hoon {nick}, tu bata tera din kaisa chal raha hai.",
+                f"Bilkul theek hoon {nick}, tu apna update de na.",
+                f"Theek hoon {nick}, aaj tera mood kaisa hai?",
+            ], history)
 
         if _contains_any(u, ["ghar", "maa", "mummy", "mom", "papa", "dad", "behen", "bhai", "choti"]):
             # Only provide safe generic status; no invented specifics.
-            return f"{nick}, ghar pe sab theek hain aur sab tujhe yaad kar rahe hain."
+            return _pick_non_repeating_variant([
+                f"{nick}, ghar pe sab theek hain aur sab tujhe yaad kar rahe hain.",
+                f"Sab badhiya hai {nick}, ghar me sab safe aur khush hain.",
+                f"Tension mat le {nick}, ghar ka sab scene theek hai.",
+            ], history)
 
         if _contains_any(u, ["agle hafte", "agla hafte", "aaunga", "aunga", "ghar aa", "milne aa"]):
-            return f"Bahut achha {nick}, tu aayega to bahut khushi hogi, bas safely aana."
+            return _pick_non_repeating_variant([
+                f"Bahut achha {nick}, tu aayega to bahut khushi hogi, bas safely aana.",
+                f"Wah {nick}, milke bahut accha lagega, travel safely.",
+                f"Perfect {nick}, tu aa raha hai to maza aa jayega, dhyan se aana.",
+            ], history)
 
         if _contains_any(u, ["khana", "chole", "bhature", "banva", "bana", "khila"]):
             # Reflect user wish without claiming it already happened.
-            return f"Theek hai {nick}, yaad rakha maine, tu aayega to pyaar se bana denge."
+            return _pick_non_repeating_variant([
+                f"Theek hai {nick}, yaad rakha maine, tu aayega to pyaar se bana denge.",
+                f"Done {nick}, note kar liya, milte hi achha sa khana banega.",
+                f"Bilkul {nick}, jab aayega tab mast treat milegi.",
+            ], history)
 
         if _contains_any(u, ["yaad", "miss"]):
-            return f"Main bhi tujhe bahut yaad karta hoon {nick}, tu message karta rehna."
+            return _pick_non_repeating_variant([
+                f"Main bhi tujhe yaad karta hoon {nick}, touch me rehna.",
+                f"Miss karta hoon {nick}, message karta reh.",
+                f"Same here {nick}, tu ping karta rehna.",
+            ], history)
 
         # If user message is short follow-up, respond warmly and ask a grounded prompt.
         if len(u.split()) <= 8:
-            return f"Haan {nick}, samjha maine, aur bata abhi kya chal raha hai."
+            return _pick_non_repeating_variant([
+                f"Samjha {nick}, badhiya, aur bata abhi kya chal raha hai.",
+                f"Sahi hai {nick}, aur suna aaj kya update hai.",
+                f"Theek {nick}, bol aage kya soch raha hai.",
+            ], history)
 
         # Fall through to LLM for broader conversation.
         if _contains_any(recent, ["python", "code", "exam", "interview", "project"]):
             return None
         return f"Samjha {nick}, main dhyaan se sun raha hoon, aaram se bol."
+
+    @staticmethod
+    def _fast_hinglish_reply(user_text: str, persona: dict[str, str], history: list[dict[str, Any]] | None) -> str | None:
+        """Low-latency deterministic replies for short conversational Hindi turns."""
+        u = (user_text or "").lower().strip()
+        nick = (persona.get("nickname") or "beta").strip()
+
+        if _contains_any(u, ["hi", "hello", "namaste", "namaskar", "hey"]):
+            return _pick_non_repeating_variant([
+                f"Namaste {nick}, bol kya chal raha hai.",
+                f"Hi {nick}, suna aaj kya scene hai.",
+                f"Aaja {nick}, bata aaj kya update hai.",
+            ], history)
+
+        if _contains_any(u, ["theek", "badhiya", "badiya", "mast", "sahi hu", "sahi ho"]):
+            return _pick_non_repeating_variant([
+                f"Bahut badhiya {nick}, aise hi pace bana ke rakh.",
+                f"Sahi hai {nick}, momentum mast hai.",
+                f"Great {nick}, yehi flow continue rakh.",
+            ], history)
+
+        if _contains_any(u, ["college", "kaam", "project", "assignment"]):
+            return _pick_non_repeating_variant([
+                f"Great {nick}, college ka kaam consistency se kar, kaafi achha progress hoga.",
+                f"Nice {nick}, daily thoda kaam karega to load kam lagega.",
+                f"Solid {nick}, project ko chhote tasks me tod ke kar, easy rahega.",
+            ], history)
+
+        if _contains_any(u, ["haan", "hmm", "mujhe bhi", "achha", "acha"]):
+            return _pick_non_repeating_variant([
+                f"Sahi hai {nick}, jo bolna hai seedha bol, main dhyaan se sun raha hoon.",
+                f"Theek {nick}, aaram se bol, main yahin hoon.",
+                f"Haan {nick}, continue kar, main sun raha hoon.",
+            ], history)
+
+        return None
 
     @staticmethod
     def _family_hallucination_guard(
@@ -448,28 +874,70 @@ class BrainAgent:
     def _call_ollama(self, messages: list) -> str:
         if not self._probe_ollama():
             return ""
-        try:
-            resp = requests.post(
+        start_time = time.time()
+
+        def _stream_collect(model_name: str) -> str:
+            response_text = ""
+            with requests.post(
                 f"{self.ollama_url}/api/chat",
                 json={
-                    "model":    self.model,
+                    "model": model_name,
                     "messages": messages,
-                    "stream":   False,
-                    "options":  {
-                        "temperature":   0.45,
-                        "top_p":         0.8,
-                        "num_predict":   110,
-                        "repeat_penalty": 1.22,
-                        "stop":          ["\n\n", "###", "Human:", "User:"],
+                    "stream": True,
+                    "options": {
+                        "temperature": 0.6,
+                        "top_p": 0.9,
+                        "num_predict": 100,
                     },
                 },
-                timeout=90,
-            )
-            resp.raise_for_status()
-            return resp.json().get("message", {}).get("content", "").strip()
+                timeout=(10, 60),
+                stream=True,
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines(decode_unicode=True):
+                    if not line:
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    message = chunk.get("message") or {}
+                    content = message.get("content")
+                    if isinstance(content, str):
+                        response_text += content
+            return response_text.strip()
+
+        try:
+            # Primary model
+            text = _stream_collect(self.model)
+            if text:
+                print(f"[LLM Time]: {time.time() - start_time:.2f}s")
+                return text
+
+            # Optional fallback for mistral
+            if self.model == "mistral":
+                print("[BrainAgent] Empty response from mistral, retrying with phi3")
+                text = _stream_collect("phi3")
+                print(f"[LLM Time]: {time.time() - start_time:.2f}s")
+                return text
+
+            print(f"[LLM Time]: {time.time() - start_time:.2f}s")
+            return ""
 
         except requests.exceptions.ConnectionError:
             self._available = False   # Mark unavailable until next probe
+            return ""
+        except requests.exceptions.HTTPError as exc:
+            # Optional fallback when model is unavailable server-side
+            if self.model == "mistral":
+                try:
+                    print(f"[BrainAgent] mistral unavailable ({exc}), falling back to phi3")
+                    text = _stream_collect("phi3")
+                    print(f"[LLM Time]: {time.time() - start_time:.2f}s")
+                    return text
+                except Exception:
+                    pass
+            print(f"[BrainAgent] Ollama HTTP error: {exc}")
             return ""
         except Exception as exc:
             print(f"[BrainAgent] Ollama error: {exc}")
@@ -610,7 +1078,7 @@ class BrainAgent:
             return f"Haan {nick}, main yahin hoon."
 
         # Keep address personal and consistent.
-        if nick and nick.lower() not in out.lower() and len(out.split()) > 4:
+        if nick and nick.lower() not in out.lower() and len(out.split()) > 8 and random.random() < 0.35:
             out = f"{nick}, {out[0].lower() + out[1:] if len(out) > 1 else out.lower()}"
 
         # Relationship-aware soft tone correction when model sounds distant.

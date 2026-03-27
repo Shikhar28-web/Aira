@@ -330,21 +330,38 @@ let mediaRecorder = null;
 let audioChunks = [];
 let toastTimer = null;
 let introTimers = [];
+let pendingAudioUrl = null;
+let audioUnlockHandlersBound = false;
+let currentUser = null;
+let currentCompanionId = null;
+let companions = [];
+let isCompanionOnboarding = false;
 
-// Map our language + gender choice to valid Bulbul v2 speakers
-// For bulbul:v2, allowed speakers (from Sarvam docs / error) include:
-// anushka, abhilash, manisha, vidya, arya, karun, hitesh
+function dbLanguageToUiCode(language) {
+  const low = (language || '').toLowerCase();
+  if (low === 'english') return 'en-IN';
+  if (low === 'hindi') return 'hi-IN';
+  return 'hi-IN';
+}
+
+function uiCodeToDbLanguage(code) {
+  if (code === 'en-IN') return 'english';
+  if (code === 'hi-IN') return 'hindi';
+  return 'hinglish';
+}
+
+// Voice hint map used by backend TTS selection.
 const VOICE_MAP = {
-  'hi-IN': { female: 'anushka', male: 'karun'  },
-  'bn-IN': { female: 'anushka', male: 'karun'  },
-  'ta-IN': { female: 'anushka', male: 'karun'  },
-  'te-IN': { female: 'anushka', male: 'karun'  },
-  'kn-IN': { female: 'anushka', male: 'karun'  },
-  'ml-IN': { female: 'anushka', male: 'karun'  },
-  'mr-IN': { female: 'anushka', male: 'karun'  },
-  'gu-IN': { female: 'anushka', male: 'karun'  },
-  'pa-IN': { female: 'anushka', male: 'karun'  },
-  'en-IN': { female: 'anushka', male: 'karun'  }, // reuse same voices for English
+  'hi-IN': { female: 'female', male: 'male' },
+  'bn-IN': { female: 'female', male: 'male' },
+  'ta-IN': { female: 'female', male: 'male' },
+  'te-IN': { female: 'female', male: 'male' },
+  'kn-IN': { female: 'female', male: 'male' },
+  'ml-IN': { female: 'female', male: 'male' },
+  'mr-IN': { female: 'female', male: 'male' },
+  'gu-IN': { female: 'female', male: 'male' },
+  'pa-IN': { female: 'female', male: 'male' },
+  'en-IN': { female: 'female', male: 'male' },
 };
 const LANG_SHORT = {
   'hi-IN':'HI','bn-IN':'BN','ta-IN':'TA','te-IN':'TE','kn-IN':'KN',
@@ -522,6 +539,67 @@ function enterFromIntro() {
   initLandingAnimations();
 }
 
+function resetPersonaForm(prefillName = '') {
+  document.getElementById('lovedName').value = prefillName;
+  document.getElementById('relationship').value = '';
+  document.getElementById('language').value = 'hi-IN';
+  document.getElementById('voiceType').value = 'female';
+  document.getElementById('q_nickname').value = '';
+  document.getElementById('q_phrases').value = '';
+  document.getElementById('q_wisdom').value = '';
+  document.getElementById('audioFile').value = '';
+  document.getElementById('audioFileTag').style.display = 'none';
+
+  uploadedAudioFile = null;
+  audioTranscript = '';
+  profileVoiceId = '';
+  selectedPersonality = 'warm and caring';
+  document.querySelectorAll('.pers-chip').forEach((chip, i) => {
+    chip.classList.toggle('selected', i === 0);
+  });
+}
+
+function personalityToStyle(personality) {
+  const p = (personality || '').toLowerCase();
+  if (p.includes('strict') || p.includes('practical')) return 'formal';
+  if (p.includes('support')) return 'supportive';
+  if (p.includes('motivat')) return 'motivational';
+  return 'casual';
+}
+
+async function openCompanionOnboarding(prefillName = '') {
+  isCompanionOnboarding = true;
+  resetPersonaForm(prefillName);
+  showScreen('setupScreen');
+}
+
+async function handleGetStarted() {
+  try {
+    const res = await fetch('/api/companions');
+    const data = await res.json().catch(() => ({}));
+    const rows = (res.ok && data.ok && Array.isArray(data.companions)) ? data.companions : [];
+
+    companions = rows;
+    if (!companions.length) {
+      await openCompanionOnboarding();
+      return;
+    }
+
+    const first = companions[0];
+    currentCompanionId = first.id;
+    profile.name = first.name || 'Companion';
+    profile.language = dbLanguageToUiCode(first.language);
+    profile.voiceType = first.voice_type || 'female';
+    profileVoiceId = first.profile_voice_id || '';
+    profile.nickname = (currentUser && currentUser.username) ? currentUser.username : 'friend';
+
+    setupChatUI();
+    showScreen('chatScreen');
+  } catch (_) {
+    await openCompanionOnboarding();
+  }
+}
+
 // ══════════════════════════════
 // SETUP STEP 1
 // ══════════════════════════════
@@ -607,6 +685,38 @@ async function startChat() {
   }
 
   buildSystemPrompt();
+
+  // Create companion from onboarding details before entering chat.
+  try {
+    const style = personalityToStyle(profile.personality);
+    const langPref = uiCodeToDbLanguage(profile.language);
+    const createRes = await fetch('/api/companions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: profile.name,
+        style,
+        language: langPref,
+        voice_type: profile.voiceType || 'female',
+        profile_voice_id: profileVoiceId || null,
+      }),
+    });
+    const createData = await createRes.json().catch(() => ({}));
+    if (!createRes.ok || !createData.ok || !createData.companion) {
+      showToast(createData.error || 'Could not create companion');
+      btn.disabled = false;
+      document.querySelector('#startChatBtn span').textContent = t('btn_start');
+      return;
+    }
+    currentCompanionId = createData.companion.id;
+  } catch (_) {
+    showToast('Could not create companion');
+    btn.disabled = false;
+    document.querySelector('#startChatBtn span').textContent = t('btn_start');
+    return;
+  }
+
+  isCompanionOnboarding = false;
   setupChatUI();
   showScreen('chatScreen');
 
@@ -683,7 +793,297 @@ function setupChatUI() {
   const area = document.getElementById('messagesArea');
   area.innerHTML = '';
   appendSysMsg(`${profile.name} ${t('sys_start')}`);
-  sendBotGreeting();
+  bindSidebarActions();
+  refreshCompanions().then(() => {
+    if (!chatHistory.length) {
+      sendBotGreeting();
+    }
+  });
+}
+
+function bindSidebarActions() {
+  const newChatBtn = document.getElementById('newChatBtn');
+  const editBtn = document.getElementById('editCompanionBtn');
+  const deleteBtn = document.getElementById('deleteCompanionBtn');
+
+  if (newChatBtn && newChatBtn.dataset.bound !== '1') {
+    newChatBtn.dataset.bound = '1';
+    newChatBtn.textContent = 'Add Companion';
+    newChatBtn.addEventListener('click', async () => {
+      await openCompanionOnboarding();
+    });
+  }
+
+  if (editBtn && editBtn.dataset.bound !== '1') {
+    editBtn.dataset.bound = '1';
+    editBtn.addEventListener('click', openCompanionEditor);
+  }
+
+  if (deleteBtn && deleteBtn.dataset.bound !== '1') {
+    deleteBtn.dataset.bound = '1';
+    deleteBtn.addEventListener('click', deleteCurrentCompanion);
+  }
+
+  const cancelBtn = document.getElementById('cancelCompanionEditBtn');
+  const saveBtn = document.getElementById('saveCompanionEditBtn');
+  const backdrop = document.getElementById('companionModalBackdrop');
+
+  if (cancelBtn && cancelBtn.dataset.bound !== '1') {
+    cancelBtn.dataset.bound = '1';
+    cancelBtn.addEventListener('click', closeCompanionEditor);
+  }
+  if (saveBtn && saveBtn.dataset.bound !== '1') {
+    saveBtn.dataset.bound = '1';
+    saveBtn.addEventListener('click', saveCompanionEdits);
+  }
+  if (backdrop && backdrop.dataset.bound !== '1') {
+    backdrop.dataset.bound = '1';
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) closeCompanionEditor();
+    });
+  }
+}
+
+async function refreshCompanions() {
+  try {
+    const res = await fetch('/api/companions');
+    if (!res.ok) {
+      companions = [];
+      currentCompanionId = null;
+      renderCompanionsSidebar();
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    companions = Array.isArray(data.companions) ? data.companions : [];
+
+    if (!companions.length) {
+      renderCompanionsSidebar();
+      return;
+    }
+
+    if (!currentCompanionId || !companions.some((c) => c.id === currentCompanionId)) {
+      currentCompanionId = companions[0].id;
+    }
+
+    await loadCompanionMessages(currentCompanionId);
+  } catch (_) {
+    companions = [];
+    currentCompanionId = null;
+    renderCompanionsSidebar();
+  }
+}
+
+function renderCompanionsSidebar() {
+  const listEl = document.getElementById('historyList');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  if (!companions.length) {
+    listEl.innerHTML = '<div class="history-empty">No companions yet</div>';
+    return;
+  }
+
+  companions.forEach((c) => {
+    const item = document.createElement('button');
+    item.className = `history-item${c.id === currentCompanionId ? ' active' : ''}`;
+    item.type = 'button';
+    item.textContent = c.name || `Companion ${c.id}`;
+    item.addEventListener('click', async () => {
+      await loadCompanionMessages(c.id);
+    });
+    listEl.appendChild(item);
+  });
+}
+
+function openCompanionEditor() {
+  if (!currentCompanionId) {
+    showToast('Select a companion first');
+    return;
+  }
+
+  const row = companions.find((c) => c.id === currentCompanionId);
+  if (!row) {
+    showToast('Companion not found');
+    return;
+  }
+
+  document.getElementById('companionEditName').value = row.name || '';
+  document.getElementById('companionEditStyle').value = row.style || 'casual';
+  document.getElementById('companionEditLanguage').value = row.language || 'hinglish';
+  document.getElementById('companionEditVoiceType').value = row.voice_type || 'female';
+  document.getElementById('companionEditAudio').value = '';
+
+  const err = document.getElementById('companionModalError');
+  err.style.display = 'none';
+  err.textContent = '';
+
+  document.getElementById('companionModalBackdrop').style.display = 'flex';
+}
+
+function closeCompanionEditor() {
+  const backdrop = document.getElementById('companionModalBackdrop');
+  if (backdrop) backdrop.style.display = 'none';
+}
+
+async function saveCompanionEdits() {
+  if (!currentCompanionId) return;
+
+  const name = document.getElementById('companionEditName').value.trim();
+  const style = document.getElementById('companionEditStyle').value;
+  const language = document.getElementById('companionEditLanguage').value;
+  const voiceType = document.getElementById('companionEditVoiceType').value;
+  const file = document.getElementById('companionEditAudio').files[0] || null;
+  const err = document.getElementById('companionModalError');
+
+  err.style.display = 'none';
+  err.textContent = '';
+
+  if (!name) {
+    err.textContent = 'Name is required';
+    err.style.display = 'block';
+    return;
+  }
+
+  const saveBtn = document.getElementById('saveCompanionEditBtn');
+  saveBtn.disabled = true;
+
+  try {
+    let uploadedVoiceId = null;
+    if (file) {
+      const fd = new FormData();
+      fd.append('audio', file, file.name);
+      fd.append('language_code', dbLanguageToUiCode(language));
+      const voiceRes = await fetch(`/api/companions/${currentCompanionId}/voice`, {
+        method: 'POST',
+        body: fd,
+      });
+      const voiceData = await voiceRes.json().catch(() => ({}));
+      if (!voiceRes.ok || !voiceData.ok) {
+        err.textContent = voiceData.error || 'Could not upload voice sample';
+        err.style.display = 'block';
+        saveBtn.disabled = false;
+        return;
+      }
+      uploadedVoiceId = voiceData.profile_voice_id || null;
+    }
+
+    const existing = companions.find((c) => c.id === currentCompanionId) || {};
+    const res = await fetch(`/api/companions/${currentCompanionId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        style,
+        language,
+        voice_type: voiceType,
+        profile_voice_id: uploadedVoiceId || existing.profile_voice_id || null,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      err.textContent = data.error || 'Could not save companion';
+      err.style.display = 'block';
+      saveBtn.disabled = false;
+      return;
+    }
+
+    closeCompanionEditor();
+    await refreshCompanions();
+    await loadCompanionMessages(currentCompanionId);
+    showToast('Companion updated');
+  } catch (_) {
+    err.textContent = 'Server error while saving companion';
+    err.style.display = 'block';
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+async function deleteCurrentCompanion() {
+  if (!currentCompanionId) {
+    showToast('Select a companion first');
+    return;
+  }
+  if (!confirm('Delete this companion and all linked chat?')) return;
+
+  try {
+    const res = await fetch(`/api/companions/${currentCompanionId}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      showToast(data.error || 'Could not delete companion');
+      return;
+    }
+
+    currentCompanionId = null;
+    profileVoiceId = '';
+    await refreshCompanions();
+
+    if (companions.length) {
+      currentCompanionId = companions[0].id;
+      await loadCompanionMessages(currentCompanionId);
+    } else {
+      chatHistory = [];
+      const area = document.getElementById('messagesArea');
+      if (area) area.innerHTML = '';
+      appendSysMsg('No companions left. Add one to continue.');
+    }
+    showToast('Companion deleted');
+  } catch (_) {
+    showToast('Server error while deleting companion');
+  }
+}
+
+async function loadCompanionMessages(companionId) {
+  currentCompanionId = companionId;
+
+  const activeCompanion = companions.find((c) => c.id === currentCompanionId);
+  if (activeCompanion) {
+    profile.name = activeCompanion.name || profile.name || 'Companion';
+    profile.language = dbLanguageToUiCode(activeCompanion.language);
+    profile.voiceType = activeCompanion.voice_type || profile.voiceType || 'female';
+    profileVoiceId = activeCompanion.profile_voice_id || '';
+    document.getElementById('chatName').textContent = profile.name;
+    document.getElementById('chatAvatar').textContent = (profile.name[0] || '?').toUpperCase();
+    document.getElementById('chatLangBadge').textContent = LANG_SHORT[profile.language] || 'HI';
+  }
+
+  const area = document.getElementById('messagesArea');
+  if (!area) return;
+  area.innerHTML = '';
+
+  try {
+    const res = await fetch(`/api/messages/${companionId}`);
+    if (!res.ok) {
+      chatHistory = [];
+      appendSysMsg(`${profile.name} ${t('sys_start')}`);
+      renderCompanionsSidebar();
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const msgs = Array.isArray(data.messages) ? data.messages : [];
+
+    chatHistory = [];
+    if (!msgs.length) {
+      appendSysMsg(`${profile.name} ${t('sys_start')}`);
+    }
+
+    msgs.forEach((m) => {
+      if (m.role === 'user') {
+        chatHistory.push({ role: 'user', content: m.message || '' });
+        appendMessage('user', m.message || '');
+      } else if (m.role === 'assistant') {
+        chatHistory.push({ role: 'assistant', content: m.message || '' });
+        appendMessage('bot', m.message || '', true);
+      }
+    });
+  } catch (_) {
+    chatHistory = [];
+    appendSysMsg(`${profile.name} ${t('sys_start')}`);
+  }
+
+  renderCompanionsSidebar();
 }
 
 async function sendBotGreeting() {
@@ -708,6 +1108,20 @@ async function sendBotGreeting() {
 // SEND MESSAGE
 // ══════════════════════════════
 async function sendMessage() {
+  if (!currentCompanionId) {
+    await refreshCompanions();
+    if (!currentCompanionId) {
+      showToast('Create a companion first');
+      await openCompanionOnboarding();
+      return;
+    }
+  }
+
+  if (!currentCompanionId) {
+    showToast('Create a companion first');
+    return;
+  }
+
   const input = document.getElementById('chatInput');
   const text = input.value.trim();
   if (!text) return;
@@ -720,27 +1134,20 @@ async function sendMessage() {
 async function getBotReply() {
   const typingId = showTyping();
   try {
-    // Sarvam chat API requires first non-system message to be from user.
-    const cleanedMessages = [];
-    let seenUser = false;
-    for (const m of chatHistory) {
-      if (!seenUser) {
-        if (m.role === 'user') {
-          seenUser = true;
-          cleanedMessages.push(m);
-        } else {
-          // skip assistant messages before first user message
-          continue;
-        }
-      } else {
-        cleanedMessages.push(m);
-      }
+    const lastUser = [...chatHistory].reverse().find((m) => m.role === 'user');
+    if (!lastUser || !lastUser.content) {
+      removeTyping(typingId);
+      return;
     }
 
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system: systemPrompt, messages: cleanedMessages }),
+      body: JSON.stringify({
+        system: systemPrompt,
+        message: lastUser.content,
+        companion_id: currentCompanionId,
+      }),
     });
     removeTyping(typingId);
 
@@ -765,6 +1172,42 @@ async function getBotReply() {
     chatHistory.push({ role: 'assistant', content: fallback });
     appendMessage('bot', fallback, true);
     showToast('Server se connect nahi ho saka. Python server chal raha hai?');
+  }
+}
+
+async function ensureAuthenticated() {
+  try {
+    const res = await fetch('/api/me');
+    if (!res.ok) {
+      window.location.href = '/login';
+      return false;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!data.ok || !data.authenticated) {
+      window.location.href = '/login';
+      return false;
+    }
+    currentUser = data.user || null;
+    return true;
+  } catch (_) {
+    window.location.href = '/login';
+    return false;
+  }
+}
+
+function bindTopbarNavActions() {
+  const logoutBtn = document.getElementById('logoutNavBtn');
+
+  if (logoutBtn && logoutBtn.dataset.bound !== '1') {
+    logoutBtn.dataset.bound = '1';
+    logoutBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+      } catch (_) {
+        // ignore network errors, continue redirect
+      }
+      window.location.href = '/login';
+    });
   }
 }
 
@@ -811,18 +1254,18 @@ async function speakText(text, btnEl) {
 
     if (data.voice_cloned) {
       updateCloneBadge('on');
-    } else if (data.profile_voice_loaded && data.clone_ready) {
-      updateCloneBadge('warming');
     } else if (data.profile_voice_loaded && !data.clone_ready) {
+      updateCloneBadge('warming');
+    } else if (data.profile_voice_loaded && data.clone_ready) {
       updateCloneBadge('off');
     } else {
       updateCloneBadge('off');
     }
 
     if (data.profile_voice_loaded && !data.voice_cloned && data.clone_ready) {
-      showToast(uiLang === 'hi' ? 'Voice clone model warm-up ho raha hai, thoda wait karo…' : 'Voice clone model is warming up, please wait...');
+      showToast(uiLang === 'hi' ? 'Clone sample mila, par is reply par clone apply nahi hua.' : 'Clone sample loaded, but this reply was not cloned.');
     } else if (data.profile_voice_loaded && !data.clone_ready) {
-      showToast(uiLang === 'hi' ? 'Voice clone model load nahi hua, backend logs check karo.' : 'Voice clone model is unavailable, check backend logs.');
+      showToast(uiLang === 'hi' ? 'Voice clone model warm-up ho raha hai, thoda wait karo…' : 'Voice clone model is warming up, please wait...');
     }
 
     const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
@@ -831,9 +1274,11 @@ async function speakText(text, btnEl) {
     const audio = new Audio(url);
     audio.onended = () => { URL.revokeObjectURL(url); };
     try { await audio.play(); } catch (playErr) {
-      // Autoplay blocked — create a temporary play button as fallback
+      // Browser may block playback after async work; queue for next user gesture.
       console.warn('Autoplay blocked:', playErr);
-      showToast('Click anywhere to allow audio playback');
+      pendingAudioUrl = url;
+      showToast(uiLang === 'hi' ? 'Audio allow karne ke liye screen par ek baar tap/click karo.' : 'Tap/click once anywhere to allow audio playback.');
+      return;
     }
   } catch (e) {
     console.error('TTS error:', e);
@@ -984,6 +1429,9 @@ function resetProfile() {
   if (!confirm(t('toast_reset'))) return;
   profile = {}; chatHistory = []; systemPrompt = '';
   uploadedAudioFile = null; audioTranscript = ''; profileVoiceId = '';
+  currentCompanionId = null;
+  companions = [];
+  isCompanionOnboarding = false;
   updateCloneBadge('off');
   document.getElementById('lovedName').value = '';
   document.getElementById('relationship').value = '';
@@ -995,7 +1443,7 @@ function resetProfile() {
     c.classList.toggle('selected', i === 0);
   });
   selectedPersonality = 'warm and caring';
-  showScreen('welcomeScreen');
+  showScreen('landingScreen');
 }
 
 // ══════════════════════════════
@@ -1007,6 +1455,28 @@ function showToast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+function bindAudioUnlockHandlers() {
+  if (audioUnlockHandlersBound) return;
+  audioUnlockHandlersBound = true;
+
+  const tryPlayPending = async () => {
+    if (!pendingAudioUrl) return;
+    const url = pendingAudioUrl;
+    pendingAudioUrl = null;
+    const audio = new Audio(url);
+    audio.onended = () => { URL.revokeObjectURL(url); };
+    try {
+      await audio.play();
+    } catch {
+      // Keep silent here; user can tap play button again if needed.
+    }
+  };
+
+  ['click', 'keydown', 'touchstart'].forEach(evt => {
+    document.addEventListener(evt, tryPlayPending, { passive: true });
+  });
 }
 
 // ══════════════════════════════
@@ -1099,9 +1569,15 @@ function closeLangDropdown() {
 // ══════════════════════════════
 // INIT
 // ══════════════════════════════
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  const ok = await ensureAuthenticated();
+  if (!ok) return;
+
+  bindTopbarNavActions();
+
   initTheme();
   initUiLang();
+  bindAudioUnlockHandlers();
   startIntroSequence();
 
   // Click anywhere on intro stage to skip (except the enter button)

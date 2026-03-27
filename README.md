@@ -15,6 +15,10 @@ Current architecture in this repo:
 - Agent 3: `ActionAgent` (OS actions like opening apps, volume, search)
 - Agent 4: `VoiceAgent` (text-to-speech + optional voice cloning)
 - `WakeAgent` (always-listening wake phrase: "SarvSathi")
+- SQLite data layer: `backend/db.py` (users, companions, chats)
+  - Companion-based message history (messages linked by `companion_id`)
+  - Conversation-thread helpers may still exist for backward compatibility
+- Auth layer: `backend/auth.py` (register/login with bcrypt + Flask session)
 
 Main backend entrypoint:
 - `backend/server.py`
@@ -32,8 +36,8 @@ Frontend:
 ## LLM Names (One Place)
 
 Current (offline, Ollama):
-- `qwen2.5:7b-instruct` (default in `backend/server.py`)
-- `mistral` (default in `sarvsathi.py`)
+- `mistral` (default in `backend/server.py` and `sarvsathi.py`)
+- fallback to `phi3` in `BrainAgent` when `mistral` is unavailable
 
 Used earlier (legacy cloud stack):
 - `gemini-2.5-flash`
@@ -52,8 +56,10 @@ Also supported in BrainAgent with Ollama (if installed locally):
 
 2. LLM (chat/brain)
 - Runtime: Ollama
-- Current default model in web backend: `qwen2.5:7b-instruct` (via `OLLAMA_MODEL`)
+- Current default model in web backend: `mistral` (via `OLLAMA_MODEL`)
 - Standalone script default: `mistral`
+- LLM responses are collected via streaming chunks in `BrainAgent` for lower perceived latency
+- Short-term in-memory conversation history is used (recent turns only) to improve context continuity
 - Brain agent is compatible with other Ollama models too (for example Llama/Phi family if available locally)
 
 3. TTS (speech synthesis)
@@ -74,6 +80,14 @@ The current codebase has moved to local/offline-first agents and Ollama/Whisper/
 ## Features Implemented Till Now
 
 - Persona-based conversation setup (name, relation, style, phrases, nickname)
+- Conditional onboarding from landing page:
+  - New users (no companions) go through full persona setup
+  - Returning users go directly to chat with saved companions in sidebar
+- Add Companion now uses the same full persona setup flow
+- Companion management in chat sidebar:
+  - Edit companion name/style/language/voice type
+  - Upload or replace companion voice sample
+  - Delete companion directly from chat UI
 - Text chat and voice chat UI
 - Multilingual UI modes (`en`, `hi`, `hinglish`)
 - Speech-to-text transcription endpoint
@@ -93,11 +107,80 @@ The current codebase has moved to local/offline-first agents and Ollama/Whisper/
   - Returns whether wake word has been detected
 
 - `POST /api/chat`
-  - Input JSON: `system`, `messages`
+  - Input JSON: `system`, `message`, `companion_id`
+  - Legacy payload with `messages` is still accepted for compatibility
   - Output: assistant `reply`, optional `action`
+  - If authenticated session exists, user/assistant messages are stored in SQLite chats table
+  - BrainAgent loads last chat turns from SQLite for authenticated users to keep context consistent across sessions
+  - BrainAgent also checks last 3 stored emotions and adds simple supportive/light tone hints (rule-based)
+  - If companion profile exists, chat system prompt is personalized (name/style/language)
+
+- `GET /api/companions`
+  - Requires authenticated session
+  - Returns all companions for current user (used by chat sidebar)
+
+- `POST /api/companions`
+  - Requires authenticated session
+  - Input JSON: `name`, `style`, `language`, optional `voice_type`, optional `profile_voice_id`
+  - Creates a companion and returns its `id`
+
+- `PUT /api/companions/<companion_id>`
+  - Requires authenticated session
+  - Input JSON: `name`, `style`, `language`, optional `voice_type`, optional `profile_voice_id`
+  - Updates one companion
+
+- `DELETE /api/companions/<companion_id>`
+  - Requires authenticated session
+  - Deletes one companion
+
+- `POST /api/companions/<companion_id>/voice`
+  - Requires authenticated session
+  - Input multipart: `audio`, optional `language_code`
+  - Stores companion voice sample and links `profile_voice_id`
+
+- `GET /api/messages/<companion_id>`
+  - Requires authenticated session
+  - Returns all messages for that companion
+
+- `GET /api/history`
+  - Requires authenticated Flask session
+  - Query param: optional `companion_id`
+  - Output: last 20 messages for current user + companion
+
+- `GET /api/me`
+  - Returns current authenticated user session details
+
+- `POST /api/logout` (also supports `GET`)
+  - Clears session and logs user out
+
+- `POST /api/register`
+  - Input JSON: `username`, `password`
+  - Output: JSON-only response + session set on success
+
+- `POST /api/login`
+  - Input JSON: `username`, `password`
+  - Output: JSON-only response + session set on success
+
+- `GET /api/companion`
+  - Requires authenticated session
+  - Returns current companion profile (`name`, `style`, `language`)
+
+- `POST /api/companion`
+  - Requires authenticated session
+  - Input JSON: `name`, `style` (`casual|formal|supportive|motivational`), `language`
+  - Creates/updates one companion profile per user
+
+Frontend pages:
+- `/login` for user login/register
+- `/settings` for companion customization (name, style, preferred language)
+
+Chat UI notes:
+- Topbar includes Logout, language switcher, and dark/light toggle
+- Logout button is text-only (no door icon)
 
 - `POST /api/tts`
-  - Input JSON: `text`, `language_code`, optional `profile_voice_id`
+  - Input JSON: `text`, `language_code`, optional `emotion`, optional `speaker`, optional `profile_voice_id`
+  - `speaker` supports gender hints (`male` / `female`) used by backend voice selection
   - Output: base64 WAV audio + clone metadata
 
 - `POST /api/stt`
@@ -118,6 +201,8 @@ The current codebase has moved to local/offline-first agents and Ollama/Whisper/
 ```text
 sarvsathi/
   backend/
+    auth.py
+    db.py
     server.py
     requirements.txt
     agents/
@@ -131,6 +216,8 @@ sarvsathi/
   frontend/
     templates/
       index.html
+      login.html
+      settings.html
     static/
       app.js
       style.css
@@ -205,7 +292,7 @@ python -m pip install faster-whisper numpy sounddevice soundfile TTS pyttsx3 pyd
 4. Pull at least one model (example):
 
 ```powershell
-ollama pull qwen2.5:7b-instruct
+ollama pull mistral
 ```
 
 ### Every time you want to run the web app
@@ -293,19 +380,35 @@ Optional runtime environment variables used by the current code:
 
 - `SARVSATHI_DEVICE` (default: `cpu`)
 - `WHISPER_MODEL` (default: `medium`)
-- `OLLAMA_MODEL` (default web: `qwen2.5:7b-instruct`)
+- `OLLAMA_MODEL` (default web: `mistral`)
 - `OLLAMA_URL` (default: `http://localhost:11434`)
 - `SARVSATHI_WAKE` (`true`/`false`, default: `true`)
 - `SARVSATHI_PROFILE_TRANSCRIBE` (`true`/`false`, default: `false`)
+- `SARVSATHI_SECRET_KEY` (Flask session secret; set this in production)
 - `APP_HOST` (default: `127.0.0.1`)
 - `APP_PORT` (default: `5000`)
 - `FLASK_DEBUG` (`true`/`false`, default: `false`)
+
+## Performance Tuning (Low Lag)
+
+Use these settings for faster and more stable local responses:
+
+- Model: `mistral` via `OLLAMA_MODEL=mistral`
+- Ensure Ollama is running before backend start: `ollama serve`
+- Keep prompt short and avoid very long chat histories
+- Current BrainAgent generation options are tuned for responsiveness:
+  - `temperature: 0.6`
+  - `top_p: 0.9`
+  - `num_predict: 100`
+- BrainAgent uses streaming chunk collection and short-term conversation memory (recent turns only)
+- If `mistral` is unavailable, BrainAgent falls back to `phi3`
 
 ## Notes
 
 - The app name appears as both "SarvSathi" and "Apna Saathi" in different parts of code/UI.
 - Current backend is offline-first and does not require cloud API keys for core local pipeline.
 - If Ollama is not running, chat quality/availability will degrade to fallback responses.
+- Database tables are initialized automatically on backend startup via `init_db()`.
 
 ## License
 

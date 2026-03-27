@@ -1,25 +1,35 @@
 """
 AGENT 4 — VOICE AGENT
 ======================
-Converts the assistant's text reply into spoken audio using
-Coqui XTTS v2 (GPU-accelerated, multilingual).
+RESPONSIBILITY: Text-to-Speech synthesis ONLY.
+Converts text reply into spoken audio using Coqui XTTS v2.
 
-Falls back to pyttsx3 if the TTS library is not installed or a
-synthesis error occurs.
+INPUT:
+    text            (str)          - Response text to synthesize
+    emotion         (str)          - Emotion detected by BrainAgent
+    language_code   (str)          - Language code (hi-IN, en-IN, etc)
 
-Language support
-----------------
-XTTS v2 natively supports:
-    en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar, zh-cn, ja, hu, ko, **hi**
+PROCESSING:
+    1. Normalize text for TTS (convert Roman→Devanagari if Hindi)
+    2. Apply emotion-based prosody modulation (speed, tone)
+    3. Synthesize audio using XTTS v2 (or fallback: pyttsx3)
+    4. Return Base64-encoded WAV string
 
-For unsupported Sarvam language codes (bn-IN, ta-IN, te-IN, kn-IN, ml-IN,
-mr-IN, gu-IN, pa-IN) the voice agent falls back to Hindi ("hi") so XTTS v2
-still works, or to pyttsx3 if XTTS v2 is unavailable.
+OUTPUT:
+    tuple(base64_audio_string, cloned_bool)
 
-Return value
-------------
-A Base64-encoded WAV string (same format the original Sarvam TTS returned),
-so the browser frontend does not need any changes.
+IMPORTANT DATA FLOW RULES:
+- Do NOT modify or shape the response_text semantically
+- Prosody modulation (speed, punctuation) is acceptable
+- Script conversion (Roman→Devanagari) is acceptable for TTS input
+- Return format must be Base64-encoded WAV (unchanged from Sarvam)
+
+Fallback strategy
+-----------------
+XTTS v2 natively supports: en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar, zh-cn, ja, hu, ko, **hi**
+
+For unsupported codes (bn-IN, ta-IN, te-IN, kn-IN, ml-IN, mr-IN, gu-IN, pa-IN),
+fallback to Hindi ("hi") or pyttsx3 if XTTS v2 unavailable.
 """
 
 import base64
@@ -30,6 +40,7 @@ import tempfile
 import threading
 import time
 import wave
+import re
 
 import numpy as np
 
@@ -49,6 +60,74 @@ _XTTS_LANG: dict[str, str] = {
 }
 
 _XTTS_SAMPLE_RATE = 24_000   # Hz (XTTS v2 native output rate)
+
+
+def _normalize_gender_hint(speaker: str | None) -> str | None:
+    """Infer gender hint from incoming speaker string."""
+    low = (speaker or "").strip().lower()
+    if not low:
+        return None
+    if low in {"male", "man", "boy"}:
+        return "male"
+    if low in {"female", "woman", "girl"}:
+        return "female"
+
+    male_markers = {"karun", "hitesh", "abhilash", "arya", "male", "man"}
+    female_markers = {"anushka", "manisha", "vidya", "female", "woman"}
+    if any(m in low for m in male_markers):
+        return "male"
+    if any(f in low for f in female_markers):
+        return "female"
+    return None
+
+
+def _pick_voice_name_by_gender(voice_names: list[str], gender_hint: str | None) -> str | None:
+    """Pick a deterministic voice candidate by gender hint from available names."""
+    if not voice_names:
+        return None
+    if gender_hint not in {"male", "female"}:
+        return voice_names[0]
+
+    names = [n for n in voice_names if isinstance(n, str) and n.strip()]
+    if not names:
+        return None
+
+    male_tokens = ("male", "man", "boy", "karun", "hitesh", "abhilash", "arya")
+    female_tokens = ("female", "woman", "girl", "anushka", "manisha", "vidya", "sarah", "anna")
+    tokens = male_tokens if gender_hint == "male" else female_tokens
+
+    for name in names:
+        low = name.lower()
+        if any(tok in low for tok in tokens):
+            return name
+
+    # Fallback so male/female still sound different when names are unknown.
+    names_sorted = sorted(names, key=lambda v: v.lower())
+    return names_sorted[-1] if gender_hint == "male" else names_sorted[0]
+
+
+def _patch_torch_load_for_xtts() -> None:
+    """
+    Coqui XTTS checkpoints currently expect torch.load with full object loading.
+    PyTorch 2.6 changed default to weights_only=True, which breaks these loads.
+    For trusted local XTTS models, force weights_only=False unless explicitly set.
+    """
+    try:
+        import torch  # noqa: PLC0415
+    except Exception:
+        return
+
+    if getattr(torch, "_sarvsathi_xtts_torchload_patched", False):
+        return
+
+    original_load = torch.load
+
+    def _patched_load(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return original_load(*args, **kwargs)
+
+    torch.load = _patched_load
+    torch._sarvsathi_xtts_torchload_patched = True
 
 
 class VoiceAgent:
@@ -90,12 +169,18 @@ class VoiceAgent:
         self,
         text: str,
         language_code: str = "hi-IN",
-        speaker: str | None = None,   # kept for API compatibility; unused
+        speaker: str | None = None,
         speaker_wav: str | None = None,
+        emotion: str = "neutral",
     ) -> tuple[str | None, bool]:
         """
         Synthesise *text* and return a Base64-encoded WAV string, or ``None``
         on complete failure.
+
+        PIPELINE:
+        1. Normalize text for TTS (prosody modulation)
+        2. Synthesize with XTTS v2 (or fallback to pyttsx3)
+        3. Return Base64 audio
 
         Strategy
         --------
@@ -109,6 +194,12 @@ class VoiceAgent:
         if not text:
             return None, False
 
+        # STEP 1: Normalize text for TTS (emotion-based prosody)
+        pause_text, speed = self._prepare_tts_text(text, emotion, language_code=language_code)
+        print(f"[TTS] Emotion={emotion}, Language={language_code}, Speed={speed:.2f}")
+        print(f"[TTS] Text={pause_text[:60]}..." if len(pause_text) > 60 else f"[TTS] Text={pause_text}")
+        gender_hint = _normalize_gender_hint(speaker)
+
         clone_requested = bool(speaker_wav and os.path.exists(speaker_wav))
         if clone_requested and VoiceAgent._xtts_model is None:
             # For clone requests, prefer a blocking XTTS load once so first
@@ -120,16 +211,18 @@ class VoiceAgent:
             try:
                 return self._xtts_synthesize(
                     VoiceAgent._xtts_model,
-                    text,
+                    pause_text,
                     language_code,
                     speaker_wav=speaker_wav,
+                    gender_hint=gender_hint,
+                    speed=speed,
                 )
             except Exception as exc:
                 print(f"[VoiceAgent] XTTS error: {exc}. Falling back to pyttsx3.")
-                fallback = self._pyttsx3_synthesize(text)
+                fallback = self._pyttsx3_synthesize(pause_text, gender_hint=gender_hint)
                 if fallback:
                     return fallback, False
-                return self._windows_system_speech_synthesize(text), False
+                return self._windows_system_speech_synthesize(pause_text), False
 
         # XTTS not loaded yet — respond instantly with pyttsx3
         # and start loading XTTS in the background
@@ -142,10 +235,61 @@ class VoiceAgent:
             self._last_xtts_attempt_ts = time.time()
             threading.Thread(target=self._load_xtts_background, daemon=True).start()
 
-        audio = self._pyttsx3_synthesize(text)
+        audio = self._pyttsx3_synthesize(pause_text, gender_hint=gender_hint)
         if audio:
             return audio, False
-        return self._windows_system_speech_synthesize(text), False
+        return self._windows_system_speech_synthesize(pause_text), False
+
+    @staticmethod
+    def _prepare_tts_text(text: str, emotion: str, language_code: str = "hi-IN") -> tuple[str, float]:
+        """
+        PROSODY MODULATION FOR TTS ONLY
+        ===============================
+        This is the SINGLE place where text shaping for TTS happens.
+        
+        INPUT:
+        - text (str)         : Response text from BrainAgent
+        - emotion (str)      : Emotion detected by BrainAgent
+        - language_code (str): Language (hi-IN, en-IN, etc)
+        
+        OUTPUT:
+        - tuple(modified_text, speed_multiplier)
+        
+        MODIFICATIONS:
+        - Emotion-based speed modulation (language-aware)
+        - For non-Hindi: optional emotional prefix ("I understand, ...")
+        - For Hindi: no English prefixes (keep natural)
+        - Minimal whitespace normalization only
+        
+        DO NOT:
+        - Change semantic meaning
+        - Alter response content significantly
+        - Force artificial punctuation patterns
+        """
+        # Default settings
+        speed = 1.0
+        pause_text = (text or "").strip()
+        is_hindi = (language_code or "").startswith("hi")
+
+        # Keep Hindi modulation subtle; strong shifts make cloned output unnatural.
+        if emotion == "sadness":
+            speed = 0.95 if is_hindi else 0.92
+            if not is_hindi:
+                pause_text = "I understand, " + pause_text
+        elif emotion == "fear":
+            speed = 0.96 if is_hindi else 0.94
+            if not is_hindi:
+                pause_text = "It is okay, " + pause_text
+        elif emotion == "anger":
+            speed = 0.98 if is_hindi else 0.97
+        elif emotion == "joy":
+            speed = 1.03 if is_hindi else 1.05
+            if not is_hindi:
+                pause_text = "That is nice, " + pause_text
+
+        # Minimal cleanup only; avoid forced ellipsis that degrades prosody.
+        pause_text = " ".join(pause_text.split())
+        return pause_text, speed
 
     def _load_xtts_blocking(self) -> None:
         """Load XTTS synchronously; used for first voice-clone request."""
@@ -154,6 +298,7 @@ class VoiceAgent:
                 self._xtts_ok = True
                 return
             try:
+                _patch_torch_load_for_xtts()
                 os.environ.setdefault("COQUI_TOS_AGREED", "1")
                 from TTS.api import TTS  # noqa: PLC0415
 
@@ -174,6 +319,7 @@ class VoiceAgent:
                 self._xtts_ok = True
                 return
             try:
+                _patch_torch_load_for_xtts()
                 # Avoid interactive CPML prompt when running as a backend service.
                 os.environ.setdefault("COQUI_TOS_AGREED", "1")
                 from TTS.api import TTS  # noqa: PLC0415
@@ -201,6 +347,8 @@ class VoiceAgent:
         text: str,
         language_code: str,
         speaker_wav: str | None = None,
+        gender_hint: str | None = None,
+        speed: float = 1.0,
     ) -> tuple[str | None, bool]:
         lang = _XTTS_LANG.get(language_code, "hi")
 
@@ -217,12 +365,48 @@ class VoiceAgent:
             "speaker_wav": speaker_ref,
             "language": lang,
         }
+
+        # If model exposes built-in speaker names, use gender hint when clone is not requested.
+        if not (speaker_wav and os.path.exists(speaker_wav)):
+            speaker_names: list[str] = []
+            try:
+                if isinstance(getattr(model, "speakers", None), (list, tuple)):
+                    speaker_names = [str(v) for v in getattr(model, "speakers")]
+                elif isinstance(getattr(model, "speakers", None), dict):
+                    speaker_names = [str(v) for v in getattr(model, "speakers").keys()]
+
+                if not speaker_names:
+                    manager = getattr(getattr(getattr(model, "synthesizer", None), "tts_model", None), "speaker_manager", None)
+                    if manager is not None:
+                        speakers_obj = getattr(manager, "speakers", None)
+                        if isinstance(speakers_obj, dict):
+                            speaker_names = [str(v) for v in speakers_obj.keys()]
+                        elif isinstance(speakers_obj, (list, tuple)):
+                            speaker_names = [str(v) for v in speakers_obj]
+            except Exception:
+                speaker_names = []
+
+            picked = _pick_voice_name_by_gender(speaker_names, gender_hint)
+            if picked:
+                kwargs.pop("speaker_wav", None)
+                kwargs["speaker"] = picked
+
         try:
-            # Slightly faster speaking pace so cloned output feels less sluggish.
-            wav: list | np.ndarray = model.tts(**kwargs, speed=1.28)
+            wav: list | np.ndarray = model.tts(**kwargs, speed=speed)
         except TypeError:
             # Older TTS builds may not expose speed; fallback safely.
             wav = model.tts(**kwargs)
+        except Exception:
+            # If speaker-name synthesis fails on this model, safely fallback to reference WAV route.
+            if "speaker" in kwargs:
+                kwargs.pop("speaker", None)
+                kwargs["speaker_wav"] = speaker_ref
+                try:
+                    wav = model.tts(**kwargs, speed=speed)
+                except TypeError:
+                    wav = model.tts(**kwargs)
+            else:
+                raise
         cloned = bool(speaker_wav and os.path.exists(speaker_wav))
         return _array_to_wav_b64(wav, _XTTS_SAMPLE_RATE), cloned
 
@@ -249,7 +433,7 @@ class VoiceAgent:
     # ── pyttsx3 fallback ────────────────────────────────────────────────────
 
     @staticmethod
-    def _pyttsx3_synthesize(text: str) -> str | None:
+    def _pyttsx3_synthesize(text: str, gender_hint: str | None = None) -> str | None:
         tmp: str | None = None
         try:
             import pyttsx3  # noqa: PLC0415
@@ -257,6 +441,21 @@ class VoiceAgent:
             engine = pyttsx3.init()
             engine.setProperty("rate",   205)
             engine.setProperty("volume", 0.90)
+
+            # Best-effort gender voice selection in fallback engine.
+            voices = engine.getProperty("voices") or []
+            if voices and gender_hint in {"male", "female"}:
+                chosen_id = None
+                for v in voices:
+                    blob = f"{getattr(v, 'name', '')} {getattr(v, 'id', '')}".lower()
+                    if gender_hint == "male" and re.search(r"\bmale\b|\bman\b", blob):
+                        chosen_id = getattr(v, "id", None)
+                        break
+                    if gender_hint == "female" and re.search(r"\bfemale\b|\bwoman\b", blob):
+                        chosen_id = getattr(v, "id", None)
+                        break
+                if chosen_id:
+                    engine.setProperty("voice", chosen_id)
 
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fh:
                 tmp = fh.name

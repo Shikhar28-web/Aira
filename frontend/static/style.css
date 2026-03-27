@@ -613,7 +613,7 @@ input, select, textarea, button {
   animation: fadeIn 0.45s ease;
 }
 .screen.active { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-#chatScreen.active { justify-content: flex-start; overflow: hidden; height: 100vh; }
+#chatScreen.active { justify-content: flex-start; align-items: stretch; overflow: hidden; height: 100vh; }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(14px); }
@@ -930,8 +930,94 @@ input, select, textarea, button {
   flex-direction: column;
   height: 100vh;
   padding-top: 56px;
+  width: 100vw;
 }
 #chatScreen.active { display: flex; }
+
+.app-container {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: calc(100vh - 56px);
+  min-height: 0;
+}
+
+.sidebar {
+  width: 250px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sidebar-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-manage-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.sidebar-manage-btn {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 0.78rem;
+}
+
+.sidebar-manage-btn.danger {
+  color: #f06b8b;
+  border-color: rgba(240, 107, 139, 0.35);
+}
+
+.sidebar-manage-btn.danger:hover {
+  color: #ff8ca7;
+  border-color: rgba(240, 107, 139, 0.6);
+}
+
+.sidebar-new-chat {
+  width: 100%;
+}
+
+.history-list {
+  padding: 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-item {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.history-item.active {
+  border-color: var(--primary);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(196, 74, 219, 0.2);
+}
+
+.history-empty {
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 8px;
+}
 
 /* chat header */
 .chat-header {
@@ -1023,6 +1109,7 @@ input, select, textarea, button {
 /* messages */
 .messages-area {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 18px 14px;
   display: flex;
@@ -1093,6 +1180,151 @@ input, select, textarea, button {
   padding: 0 3px;
 }
 .msg.user .msg-time { text-align: right; }
+
+/* auth/settings pages */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.auth-card {
+  width: min(420px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 16px;
+  padding: 22px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-card h1 {
+  font-family: 'Lora', serif;
+  font-size: 1.5rem;
+}
+
+.auth-card p {
+  color: var(--text2);
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+
+.auth-card label {
+  font-size: 0.85rem;
+  color: var(--text2);
+}
+
+.auth-card input[type="text"],
+.auth-card input[type="password"] {
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--border2);
+  background: var(--input-bg);
+  padding: 0 12px;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.auth-actions .btn-primary,
+.auth-actions .btn-ghost {
+  flex: 1;
+}
+
+.settings-group {
+  margin-top: 4px;
+}
+
+.radio-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.radio-row label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.84rem;
+}
+
+.success-msg {
+  color: #52dc85;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.modal-card {
+  width: min(460px, 92vw);
+  border-radius: 16px;
+  border: 1px solid var(--border2);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-card h3 {
+  font-family: 'Lora', serif;
+  font-size: 1.2rem;
+  margin-bottom: 4px;
+}
+
+.modal-card label {
+  font-size: 0.82rem;
+  color: var(--text2);
+  margin-top: 6px;
+}
+
+.modal-card input,
+.modal-card select {
+  border: 1px solid var(--border2);
+  background: var(--input-bg);
+  border-radius: 10px;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.modal-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 900px) {
+  .sidebar {
+    width: 210px;
+  }
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    display: none;
+  }
+}
 
 /* speak button inside bot bubble */
 .speak-btn {
