@@ -49,7 +49,7 @@ from db import (
 # ── Config from environment (all optional — sensible defaults) ────────────────
 _DEVICE       = os.getenv("SARVSATHI_DEVICE",  "cpu")
 _WHISPER_MODEL = os.getenv("WHISPER_MODEL",    "medium")
-_OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL",     "mistral")
+_OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL",     "qwen2.5:7b-instruct")
 _OLLAMA_URL    = os.getenv("OLLAMA_URL",       "http://localhost:11434")
 _WAKE_ENABLED  = os.getenv("SARVSATHI_WAKE",   "true").lower() in {"1", "true", "yes"}
 _PROFILE_TRANSCRIBE = os.getenv("SARVSATHI_PROFILE_TRANSCRIBE", "false").lower() in {"1", "true", "yes"}
@@ -60,6 +60,9 @@ _brain    = BrainAgent(model=_OLLAMA_MODEL, ollama_url=_OLLAMA_URL)
 _action   = ActionAgent()
 _voice    = VoiceAgent(device=_DEVICE)
 _wake     = WakeAgent() if _WAKE_ENABLED else None
+
+# Warm up XTTS in background so clone readiness is available earlier.
+_voice.preload_clone_model(blocking=False)
 
 if _wake:
     _wake.start()
@@ -150,12 +153,8 @@ def _prepare_text_for_tts(text: str, requested_lang: str) -> str:
     if not txt:
         return txt
 
-    req = (requested_lang or "").strip()
-    if req == "hi-IN" and not re.search(r"[\u0900-\u097F]", txt):
-        converted = hinglish_to_hindi(txt)
-        if converted and converted != txt:
-            print(f"[Server TTS] Roman->Devanagari: {txt[:40]}... -> {converted[:40]}...")
-            return converted
+    # Keep user-visible text script unchanged. Roman-to-Devanagari conversion
+    # through ITRANS can produce unnatural tokens for casual Hinglish input.
     return txt
 
 

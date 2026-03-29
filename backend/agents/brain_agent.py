@@ -255,12 +255,13 @@ def _is_hindi_or_hinglish(text: str) -> bool:
     low = (text or "").lower()
     if _has_devanagari(low):
         return True
-    markers = [
+    markers = {
         "hai", "haan", "nahi", "nhi", "kyu", "kyun", "kya", "kaise", "kaisa",
         "tum", "tu", "aap", "main", "mera", "apna", "yaar", "acha", "achha",
         "theek", "badhiya", "badiya", "chal", "raha", "rahi", "kar", "kr", "ho",
-    ]
-    hit_count = sum(1 for m in markers if m in low)
+    }
+    tokens = re.findall(r"[a-zA-Z]+", low)
+    hit_count = sum(1 for tok in tokens if tok in markers)
     return hit_count >= 2
 
 
@@ -455,12 +456,10 @@ class BrainAgent:
         # ────────────────────────────────────────────────────────────────────
         # STEP 3: Normalize input (for LLM processing)
         # ────────────────────────────────────────────────────────────────────
-        # If Hinglish (Roman) → convert to Hindi (Devanagari) for LLM processing
-        # If Hindi → keep
-        # If English → keep
+        # Keep user script as-is. Roman-script transliteration via ITRANS can
+        # corrupt natural Hinglish text (for example "beta" -> garbled output).
+        # We rely on prompt-based language mirroring instead of script conversion.
         processed_text = original_text
-        if is_hindi_or_hinglish_input and is_roman_script:
-            processed_text = hinglish_to_hindi(original_text)
         
         # ────────────────────────────────────────────────────────────────────
         # STEP 4: Emotion detection
@@ -583,10 +582,6 @@ class BrainAgent:
         response_text = self._polish_reply(response_text)
         response_text = self._enforce_persona_style(response_text, persona)
 
-        # Preserve original input script for UI display
-        if is_hindi_or_hinglish_input and is_roman_script and _has_devanagari(response_text):
-            response_text = hindi_to_hinglish(response_text)
-        
         print(f"[Processed] Response ready (original_text format preserved for UI)")
 
         # ────────────────────────────────────────────────────────────────────
@@ -627,11 +622,8 @@ class BrainAgent:
         - response_text         → "response" key (UI display)
         - hinglish_to_hindi()   → "tts_text" key (TTS synthesis)
         """
-        # Prepare TTS text: convert to Hindi/Devanagari if needed
+        # Keep same script for TTS; VoiceAgent handles prosody and language route.
         tts_text = response_text
-        if is_hindi_hinglish and is_roman_script:
-            # Roman Hinglish → Devanagari for TTS
-            tts_text = hinglish_to_hindi(response_text)
         
         # Note: No longer calling enhance_for_tts() here; 
         # VoiceAgent._prepare_tts_text() handles prosody modulation.
@@ -829,7 +821,7 @@ class BrainAgent:
                     "options": {
                         "temperature": 0.6,
                         "top_p": 0.9,
-                        "num_predict": 100,
+                        "num_predict": 220,
                     },
                 },
                 timeout=(10, 60),
@@ -850,36 +842,39 @@ class BrainAgent:
             return response_text.strip()
 
         try:
-            # Primary model
-            text = _stream_collect(self.model)
-            if text:
-                print(f"[LLM Time]: {time.time() - start_time:.2f}s")
-                return text
+            # Try preferred model first, then known local fallbacks.
+            candidates = [
+                self.model,
+                "qwen2.5:7b-instruct",
+                "mistral",
+                "llama3.1:8b",
+                "phi3",
+            ]
+            seen = set()
 
-            # Optional fallback for mistral
-            if self.model == "mistral":
-                print("[BrainAgent] Empty response from mistral, retrying with phi3")
-                text = _stream_collect("phi3")
-                print(f"[LLM Time]: {time.time() - start_time:.2f}s")
-                return text
+            for model_name in candidates:
+                if not model_name or model_name in seen:
+                    continue
+                seen.add(model_name)
+                try:
+                    text = _stream_collect(model_name)
+                    if text:
+                        if model_name != self.model:
+                            print(f"[BrainAgent] Fallback model used: {model_name}")
+                        print(f"[LLM Time]: {time.time() - start_time:.2f}s")
+                        return text
+                except requests.exceptions.HTTPError as exc:
+                    print(f"[BrainAgent] Model {model_name} unavailable ({exc})")
+                    continue
+                except Exception as exc:
+                    print(f"[BrainAgent] Model {model_name} failed ({exc})")
+                    continue
 
             print(f"[LLM Time]: {time.time() - start_time:.2f}s")
             return ""
 
         except requests.exceptions.ConnectionError:
             self._available = False   # Mark unavailable until next probe
-            return ""
-        except requests.exceptions.HTTPError as exc:
-            # Optional fallback when model is unavailable server-side
-            if self.model == "mistral":
-                try:
-                    print(f"[BrainAgent] mistral unavailable ({exc}), falling back to phi3")
-                    text = _stream_collect("phi3")
-                    print(f"[LLM Time]: {time.time() - start_time:.2f}s")
-                    return text
-                except Exception:
-                    pass
-            print(f"[BrainAgent] Ollama HTTP error: {exc}")
             return ""
         except Exception as exc:
             print(f"[BrainAgent] Ollama error: {exc}")
@@ -918,10 +913,11 @@ class BrainAgent:
         cleaned = re.sub(r"[.!?]{2,}", ".", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:\n\t")
 
-        # Keep only the first two short sentences so responses stay warm and concise.
-        chunks = re.split(r"(?<=[.!?])\s+", cleaned)
-        clipped = " ".join(chunks[:2]).strip()
-        return clipped or "Haan beta, main sun rahi hoon."
+        # Keep full useful content; only cap extreme long outputs.
+        if len(cleaned) > 700:
+            cleaned = cleaned[:700].rstrip() + "..."
+
+        return cleaned or "Haan beta, main sun rahi hoon."
 
     @staticmethod
     def _looks_generic(text: str, persona: dict[str, str]) -> bool:
