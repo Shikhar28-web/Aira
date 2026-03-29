@@ -137,6 +137,41 @@ def _patch_torch_load_for_xtts() -> None:
     torch._sarvsathi_xtts_torchload_patched = True
 
 
+def _patch_torchaudio_load_for_xtts() -> None:
+    """
+    Ensure XTTS can read local WAV references even when TorchCodec/FFmpeg DLLs
+    are unavailable on Windows.
+
+    Newer torchaudio builds can route load() through TorchCodec; if that fails,
+    fall back to soundfile decoding for local speaker reference files.
+    """
+    try:
+        import torchaudio  # noqa: PLC0415
+        import torch  # noqa: PLC0415
+        import soundfile as sf  # noqa: PLC0415
+    except Exception:
+        return
+
+    if getattr(torchaudio, "_sarvsathi_xtts_torchaudio_patched", False):
+        return
+
+    original_load = torchaudio.load
+
+    def _patched_load(uri, *args, **kwargs):
+        try:
+            return original_load(uri, *args, **kwargs)
+        except Exception as original_exc:
+            try:
+                wav_np, sr = sf.read(uri, dtype="float32", always_2d=True)
+                wav_np = np.asarray(wav_np, dtype=np.float32).T
+                return torch.from_numpy(wav_np), int(sr)
+            except Exception:
+                raise original_exc
+
+    torchaudio.load = _patched_load
+    torchaudio._sarvsathi_xtts_torchaudio_patched = True
+
+
 class VoiceAgent:
     """
     Text-to-speech synthesis with GPU acceleration.
@@ -321,6 +356,7 @@ class VoiceAgent:
                 return
             try:
                 _patch_torch_load_for_xtts()
+                _patch_torchaudio_load_for_xtts()
                 os.environ.setdefault("COQUI_TOS_AGREED", "1")
                 from TTS.api import TTS  # noqa: PLC0415
 
@@ -342,6 +378,7 @@ class VoiceAgent:
                 return
             try:
                 _patch_torch_load_for_xtts()
+                _patch_torchaudio_load_for_xtts()
                 # Avoid interactive CPML prompt when running as a backend service.
                 os.environ.setdefault("COQUI_TOS_AGREED", "1")
                 from TTS.api import TTS  # noqa: PLC0415
@@ -358,6 +395,19 @@ class VoiceAgent:
     def is_clone_ready(self) -> bool:
         """True when XTTS is loaded and clone synthesis is available."""
         return VoiceAgent._xtts_model is not None and self._xtts_ok is True
+
+    def preload_clone_model(self, blocking: bool = False) -> None:
+        """Trigger XTTS model preload so voice cloning becomes ready earlier."""
+        if VoiceAgent._xtts_model is not None:
+            self._xtts_ok = True
+            return
+        if blocking:
+            self._load_xtts_blocking()
+            return
+        if self._xtts_ok is None:
+            self._xtts_ok = False
+            self._last_xtts_attempt_ts = time.time()
+            threading.Thread(target=self._load_xtts_background, daemon=True).start()
 
     # ── XTTS v2 ────────────────────────────────────────────────────────────
 
