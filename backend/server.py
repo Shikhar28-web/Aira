@@ -9,7 +9,6 @@ Then open: http://127.0.0.1:5000
 import os
 import sys
 import re
-import threading
 import uuid
 import tempfile
 import subprocess
@@ -25,7 +24,6 @@ if _BACKEND_DIR not in sys.path:
 
 from agents.listener_agent import ListenerAgent
 from agents.brain_agent    import BrainAgent, JARVIS_SYSTEM, hinglish_to_hindi
-from agents.action_agent   import ActionAgent
 from agents.voice_agent    import VoiceAgent
 from agents.wake_agent     import WakeAgent
 from auth import auth_bp
@@ -57,7 +55,6 @@ _PROFILE_TRANSCRIBE = os.getenv("SARVSATHI_PROFILE_TRANSCRIBE", "false").lower()
 # ── Initialise agents (models are lazy-loaded on first use) ───────────────────
 _listener = ListenerAgent(model_size=_WHISPER_MODEL, device=_DEVICE)
 _brain    = BrainAgent(model=_OLLAMA_MODEL, ollama_url=_OLLAMA_URL)
-_action   = ActionAgent()
 _voice    = VoiceAgent(device=_DEVICE)
 _wake     = WakeAgent() if _WAKE_ENABLED else None
 
@@ -662,12 +659,8 @@ def chat():
                 emotion=emotion,
             )
 
-        # Fire OS action in a background thread (non-blocking)
-        action = result.get("action")
-        if action:
-            threading.Thread(
-                target=_action.execute, args=(action,), daemon=True
-            ).start()
+        # OS actions are disabled; always return null action.
+        action = None
 
         return jsonify({"reply": reply, "ok": True, "action": action})
 
@@ -847,23 +840,15 @@ def transcribe_profile_audio():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# /api/action  — run an OS action directly
+# /api/action  — disabled (OS actions removed)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/api/action", methods=["POST"])
 def action():
-    try:
-        data        = request.get_json(force=True) or {}
-        action_name = data.get("action", "")
-        if not action_name:
-            return jsonify({"ok": False, "error": "action field required"}), 400
-
-        result = _action.execute(action_name)
-        return jsonify(result)
-
-    except Exception as e:
-        print(f"[ACTION ERROR] {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({
+        "ok": False,
+        "error": "OS action feature is disabled in this build",
+    }), 403
 
 
 # ─────────────────────────────────────────────────────────────────────────────

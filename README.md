@@ -5,15 +5,14 @@ SarvSathi is a multilingual AI companion project with:
 - a standalone voice assistant mode,
 - a local multi-agent pipeline.
 
-Latest version is designed to run fully offline for core AI flow (STT -> LLM -> Action -> TTS), with optional wake-word detection and voice cloning.
+Latest version is designed to run fully offline for core AI flow (STT -> LLM -> TTS), with optional wake-word detection and voice cloning.
 
 ## Latest Status (Current Work)
 
 Current architecture in this repo:
 - Agent 1: `ListenerAgent` (speech-to-text)
 - Agent 2: `BrainAgent` (local LLM reasoning + intent detection)
-- Agent 3: `ActionAgent` (OS actions like opening apps, volume, search)
-- Agent 4: `VoiceAgent` (text-to-speech + optional voice cloning)
+- Agent 3: `VoiceAgent` (text-to-speech + optional voice cloning)
 - `WakeAgent` (always-listening wake phrase: "SarvSathi")
 - SQLite data layer: `backend/db.py` (users, companions, chats)
   - Companion-based message history (messages linked by `companion_id`)
@@ -36,8 +35,9 @@ Frontend:
 ## LLM Names (One Place)
 
 Current (offline, Ollama):
-- `mistral` (default in `backend/server.py` and `sarvsathi.py`)
-- fallback to `phi3` in `BrainAgent` when `mistral` is unavailable
+- web default: `qwen2.5:7b-instruct` (in `backend/server.py`)
+- standalone default: `mistral` (in `sarvsathi.py`)
+- BrainAgent fallback order: `qwen2.5:7b-instruct` → `mistral` → `llama3.1:8b` → `phi3`
 
 Used earlier (legacy cloud stack):
 - `gemini-2.5-flash`
@@ -56,7 +56,7 @@ Also supported in BrainAgent with Ollama (if installed locally):
 
 2. LLM (chat/brain)
 - Runtime: Ollama
-- Current default model in web backend: `mistral` (via `OLLAMA_MODEL`)
+- Current default model in web backend: `qwen2.5:7b-instruct` (via `OLLAMA_MODEL`)
 - Standalone script default: `mistral`
 - LLM responses are collected via streaming chunks in `BrainAgent` for lower perceived latency
 - Short-term in-memory conversation history is used (recent turns only) to improve context continuity
@@ -96,7 +96,6 @@ The current codebase has moved to local/offline-first agents and Ollama/Whisper/
 - Text-to-speech response endpoint
 - Profile voice sample upload and normalization for cloning
 - Wake-word trigger support ("SarvSathi")
-- OS automation actions (open apps, web search, volume, restart/shutdown)
 - Standalone always-on voice assistant loop (without browser)
 - Health/status endpoint exposing active model settings
 
@@ -111,7 +110,7 @@ The current codebase has moved to local/offline-first agents and Ollama/Whisper/
 - `POST /api/chat`
   - Input JSON: `system`, `message`, `companion_id`
   - Legacy payload with `messages` is still accepted for compatibility
-  - Output: assistant `reply`, optional `action`
+  - Output: assistant `reply`
   - If authenticated session exists, user/assistant messages are stored in SQLite chats table
   - BrainAgent loads last chat turns from SQLite for authenticated users to keep context consistent across sessions
   - BrainAgent also checks last 3 stored emotions and adds simple supportive/light tone hints (rule-based)
@@ -195,8 +194,7 @@ Chat UI notes:
   - Output includes `profile_voice_id`
 
 - `POST /api/action`
-  - Input JSON: `action`
-  - Executes OS-level action and returns status
+  - OS action feature is disabled in this build and returns `403`
 
 ## Project Structure
 
@@ -208,7 +206,6 @@ sarvsathi/
     server.py
     requirements.txt
     agents/
-      action_agent.py
       brain_agent.py
       listener_agent.py
       voice_agent.py
@@ -245,8 +242,8 @@ Recommended for full voice experience:
 From project root:
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
+python -m venv .venv310
+.venv310\Scripts\activate
 python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
 ```
@@ -283,8 +280,8 @@ So, once backend is running, frontend is already running too.
 2. Run these commands exactly:
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
+python -m venv .venv310
+.venv310\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r backend/requirements.txt
 python -m pip install faster-whisper numpy sounddevice soundfile TTS pyttsx3 pydub
@@ -294,6 +291,7 @@ python -m pip install faster-whisper numpy sounddevice soundfile TTS pyttsx3 pyd
 4. Pull at least one model (example):
 
 ```powershell
+ollama pull qwen2.5:7b-instruct
 ollama pull mistral
 ```
 
@@ -302,7 +300,7 @@ ollama pull mistral
 1. Open Terminal 1 (PowerShell) in project root:
 
 ```powershell
-.venv\Scripts\Activate.ps1
+.venv310\Scripts\Activate.ps1
 ollama serve
 ```
 
@@ -311,7 +309,7 @@ Keep this terminal open.
 2. Open Terminal 2 (PowerShell) in project root:
 
 ```powershell
-.venv\Scripts\Activate.ps1
+.venv310\Scripts\Activate.ps1
 cd backend
 python server.py
 ```
@@ -382,7 +380,7 @@ Optional runtime environment variables used by the current code:
 
 - `SARVSATHI_DEVICE` (default: `cpu`)
 - `WHISPER_MODEL` (default: `medium`)
-- `OLLAMA_MODEL` (default web: `mistral`)
+- `OLLAMA_MODEL` (default web: `qwen2.5:7b-instruct`)
 - `OLLAMA_URL` (default: `http://localhost:11434`)
 - `SARVSATHI_WAKE` (`true`/`false`, default: `true`)
 - `SARVSATHI_PROFILE_TRANSCRIBE` (`true`/`false`, default: `false`)
@@ -395,15 +393,16 @@ Optional runtime environment variables used by the current code:
 
 Use these settings for faster and more stable local responses:
 
-- Model: `mistral` via `OLLAMA_MODEL=mistral`
+- Model (web default): `qwen2.5:7b-instruct`
+- Optional faster/lighter model: `mistral` via `OLLAMA_MODEL=mistral`
 - Ensure Ollama is running before backend start: `ollama serve`
 - Keep prompt short and avoid very long chat histories
 - Current BrainAgent generation options are tuned for responsiveness:
   - `temperature: 0.6`
   - `top_p: 0.9`
-  - `num_predict: 100`
+  - `num_predict: 220`
 - BrainAgent uses streaming chunk collection and short-term conversation memory (recent turns only)
-- If `mistral` is unavailable, BrainAgent falls back to `phi3`
+- Fallback order if preferred model is unavailable: `qwen2.5:7b-instruct` → `mistral` → `llama3.1:8b` → `phi3`
 
 ## Notes
 

@@ -14,7 +14,7 @@ Output schema::
 
     {
         "intent":   "system_command | question | conversation | automation",
-        "action":   "action_name_or_None",   # see ActionAgent for full list
+        "action":   "None",
         "response": "natural language reply"
     }
 """
@@ -484,10 +484,12 @@ class BrainAgent:
             return out
 
         # ────────────────────────────────────────────────────────────────────
-        # STEP 6: Action detection + Deterministic replies
+        # STEP 6: Action detection disabled
         # ────────────────────────────────────────────────────────────────────
-        action = _detect_action(original_text)
-        intent = "system_command" if action else "conversation"
+        # OS/device actions are intentionally disabled so assistant commands
+        # are treated as regular conversation only.
+        action = None
+        intent = "conversation"
 
         # Deterministic small-talk paths disabled to avoid random hardcoded replies.
         # Keep only action/safety deterministic handling; conversational turns use LLM.

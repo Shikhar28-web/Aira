@@ -36,7 +36,6 @@ if _BACKEND_DIR not in sys.path:
 
 # ── Agent imports ─────────────────────────────────────────────────────────────
 
-from agents.action_agent  import ActionAgent
 from agents.brain_agent   import BrainAgent, JARVIS_SYSTEM
 from agents.listener_agent import ListenerAgent
 from agents.voice_agent   import VoiceAgent
@@ -130,7 +129,6 @@ def main() -> None:
 
     listener     = ListenerAgent(model_size=_WHISPER_MODEL, device=_DEVICE)
     brain        = BrainAgent(model=_OLLAMA_MODEL)
-    action_agent = ActionAgent()
     voice        = VoiceAgent(device=_DEVICE)
     wake         = WakeAgent()
 
@@ -180,15 +178,6 @@ def main() -> None:
                 history=conversation[:-1],
             )
             reply  = brain_result.get("response", "")
-            action = brain_result.get("action")
-
-            # ── Phase 5: Action Agent ────────────────────────────────────────
-            if action:
-                act_result = action_agent.execute(action)
-                act_msg    = act_result.get("message", "")
-                print(f"  [Action]     {action}  →  {act_msg}")
-                if act_msg and act_msg.lower()[:30] not in reply.lower():
-                    reply = f"{act_msg} {reply}".strip()
 
             print(f"  [SarvSathi]  {reply}\n")
             conversation.append({"role": "assistant", "content": reply})
