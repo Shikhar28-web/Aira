@@ -630,7 +630,8 @@ def chat():
             system_prompt = (
                 f"{system_prompt}\n\n"
                 f"You are {companion_name}, a {companion_style} AI companion. "
-                f"Preferred language: {preferred_language}."
+                f"Preferred language for neutral chats: {preferred_language}. "
+                f"Always mirror the user's latest language and script choice in your reply."
             )
 
         # Call brain agent with structured pipeline

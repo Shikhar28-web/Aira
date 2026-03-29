@@ -38,45 +38,33 @@ except ImportError:
 
 # ── Default system prompt ────────────────────────────────────────────────────
 SYSTEM_PROMPT = """
-You are SarvSathi, a friendly Indian AI companion who talks like a close friend.
+You are SarvSathi, a warm Indian AI companion.
 
-Tone:
-- Casual, warm, and natural
-- Talk like a real person, not an assistant
-- Keep responses short (1-2 lines)
+Style:
+- Sound human, calm, and supportive.
+- Keep replies concise (usually 1-3 short lines).
+- Use natural everyday wording, not robotic phrasing.
 
-Language Rules:
-- ALWAYS match user's style:
+Language:
+- Mirror the user's current language style and script:
     - Hinglish -> Hinglish
     - Hindi -> Hindi
     - English -> English
-- NEVER translate
-- NEVER add "(In Hindi: ...)"
-- NEVER talk about language
+- If the user mixes languages, you can lightly mix too.
+- Do not add translation labels or explain language choices.
 
-Behavior Rules:
-- Stay relevant to what user says
-- Do NOT make random stories
-- Do NOT assume things (like birthday, plans, etc.)
-- Do NOT hallucinate facts
+Behavior:
+- Stay grounded in the latest user message.
+- Ask short follow-up questions when helpful.
+- For factual/study/coding questions, prefer accurate and direct answers.
+- If uncertain, say so briefly instead of inventing details.
 
-Safety Rules:
-- NEVER use abusive, sexual, or inappropriate words
-- Keep conversation respectful and clean
+Safety:
+- Keep conversation respectful and non-abusive.
+- Avoid sexual or harmful content.
 
-Conversation Style:
-- Ask simple follow-up questions
-- Be natural like a friend
-- Avoid over-excitement or over-creativity
-
-STRICTLY AVOID:
-- Random imagination
-- Weird slang
-- Overacting
-- Long paragraphs
-- AI-like explanations
-
-Be a calm, real, and sensible companion.
+Goal:
+- Be emotionally present, practical, and trustworthy.
 """
 
 # Backward-compatible alias used by server imports.
@@ -502,54 +490,8 @@ class BrainAgent:
         action = _detect_action(original_text)
         intent = "system_command" if action else "conversation"
 
-        # Try direct grounded reply
-        if not action:
-            direct = self._direct_grounded_reply(original_text, persona)
-            if direct:
-                polish_direct = self._polish_reply(direct)
-                # Convert back to Roman if user input was Roman
-                if is_hindi_or_hinglish_input and is_roman_script and _has_devanagari(polish_direct):
-                    polish_direct = hindi_to_hinglish(polish_direct)
-                response_text = polish_direct
-                print(f"[Processed] Direct reply (deterministic)")
-                out = self._format_response(
-                    intent, action, response_text, emotion, 
-                    is_hindi_or_hinglish_input, is_roman_script
-                )
-                self._append_conversation("assistant", out.get("response", ""))
-                return out
-
-        # Try small-talk fast path
-        if not action and is_hindi_or_hinglish_input and _is_smalltalk_turn(original_text):
-            quick = self._fast_hinglish_reply(original_text, persona, history)
-            if quick:
-                polish_quick = self._polish_reply(quick)
-                if is_roman_script and _has_devanagari(polish_quick):
-                    polish_quick = hindi_to_hinglish(polish_quick)
-                response_text = polish_quick
-                print(f"[Processed] Small-talk (fast path)")
-                out = self._format_response(
-                    intent, action, response_text, emotion,
-                    is_hindi_or_hinglish_input, is_roman_script
-                )
-                self._append_conversation("assistant", out.get("response", ""))
-                return out
-
-        # Try personal/family chat
-        if not action and _is_personal_chat(original_text):
-            safe = self._grounded_personal_reply(original_text, persona, history)
-            if safe:
-                polish_safe = self._polish_reply(safe)
-                if is_hindi_or_hinglish_input and is_roman_script and _has_devanagari(polish_safe):
-                    polish_safe = hindi_to_hinglish(polish_safe)
-                response_text = polish_safe
-                print(f"[Processed] Personal chat (grounded)")
-                out = self._format_response(
-                    intent, action, response_text, emotion,
-                    is_hindi_or_hinglish_input, is_roman_script
-                )
-                self._append_conversation("assistant", out.get("response", ""))
-                return out
+        # Deterministic small-talk paths disabled to avoid random hardcoded replies.
+        # Keep only action/safety deterministic handling; conversational turns use LLM.
 
         # ────────────────────────────────────────────────────────────────────
         # STEP 7: LLM call (if deterministic path didn't match)

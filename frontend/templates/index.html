@@ -423,14 +423,11 @@
   ═══════════════════════════════ -->
   <section class="screen" id="chatScreen">
 
-    <div class="app-container">
-      <aside class="sidebar">
+    <div class="app-container" id="chatAppContainer">
+      <aside class="sidebar" id="chatSidebar">
         <div class="sidebar-header">
           <button class="btn-primary sidebar-new-chat" id="newChatBtn">New Chat</button>
-          <div class="sidebar-manage-row">
-            <button class="btn-ghost sidebar-manage-btn" id="editCompanionBtn" type="button">Edit</button>
-            <button class="btn-ghost sidebar-manage-btn danger" id="deleteCompanionBtn" type="button">Delete</button>
-          </div>
+          <button class="btn-ghost sidebar-hide-btn" id="sidebarHideBtn" type="button">Hide Sidebar</button>
         </div>
         <div class="history-list" id="historyList">
           <!-- history items injected dynamically -->
@@ -439,6 +436,13 @@
 
       <div class="chat-area">
         <div class="chat-header">
+          <button class="icon-toggle small sidebar-toggle-btn" id="sidebarToggleBtn" type="button" title="Show sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
           <div class="chat-avatar" id="chatAvatar">?</div>
           <div class="chat-identity">
             <h3 id="chatName">—</h3>

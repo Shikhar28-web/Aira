@@ -330,12 +330,18 @@ let mediaRecorder = null;
 let audioChunks = [];
 let toastTimer = null;
 let introTimers = [];
-let pendingAudioUrl = null;
+let pendingAudioBase64 = null;
+let pendingAudioButton = null;
 let audioUnlockHandlersBound = false;
+let audioPlaybackUnlocked = false;
+let currentAudio = null;
+let currentAudioUrl = null;
+let currentSpeakBtn = null;
 let currentUser = null;
 let currentCompanionId = null;
 let companions = [];
 let isCompanionOnboarding = false;
+let sidebarCollapsed = false;
 
 function dbLanguageToUiCode(language) {
   const low = (language || '').toLowerCase();
@@ -574,6 +580,9 @@ async function openCompanionOnboarding(prefillName = '') {
 }
 
 async function handleGetStarted() {
+  const ok = await ensureAuthenticated(true);
+  if (!ok) return;
+
   try {
     const res = await fetch('/api/companions');
     const data = await res.json().catch(() => ({}));
@@ -793,18 +802,15 @@ function setupChatUI() {
   const area = document.getElementById('messagesArea');
   area.innerHTML = '';
   appendSysMsg(`${profile.name} ${t('sys_start')}`);
+  applySidebarState();
   bindSidebarActions();
-  refreshCompanions().then(() => {
-    if (!chatHistory.length) {
-      sendBotGreeting();
-    }
-  });
+  refreshCompanions();
 }
 
 function bindSidebarActions() {
   const newChatBtn = document.getElementById('newChatBtn');
-  const editBtn = document.getElementById('editCompanionBtn');
-  const deleteBtn = document.getElementById('deleteCompanionBtn');
+  const hideBtn = document.getElementById('sidebarHideBtn');
+  const toggleBtn = document.getElementById('sidebarToggleBtn');
 
   if (newChatBtn && newChatBtn.dataset.bound !== '1') {
     newChatBtn.dataset.bound = '1';
@@ -814,14 +820,22 @@ function bindSidebarActions() {
     });
   }
 
-  if (editBtn && editBtn.dataset.bound !== '1') {
-    editBtn.dataset.bound = '1';
-    editBtn.addEventListener('click', openCompanionEditor);
+  if (hideBtn && hideBtn.dataset.bound !== '1') {
+    hideBtn.dataset.bound = '1';
+    hideBtn.addEventListener('click', () => {
+      sidebarCollapsed = true;
+      localStorage.setItem('saathi_sidebar_collapsed', '1');
+      applySidebarState();
+    });
   }
 
-  if (deleteBtn && deleteBtn.dataset.bound !== '1') {
-    deleteBtn.dataset.bound = '1';
-    deleteBtn.addEventListener('click', deleteCurrentCompanion);
+  if (toggleBtn && toggleBtn.dataset.bound !== '1') {
+    toggleBtn.dataset.bound = '1';
+    toggleBtn.addEventListener('click', () => {
+      sidebarCollapsed = !sidebarCollapsed;
+      localStorage.setItem('saathi_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
+      applySidebarState();
+    });
   }
 
   const cancelBtn = document.getElementById('cancelCompanionEditBtn');
@@ -842,6 +856,15 @@ function bindSidebarActions() {
       if (e.target === backdrop) closeCompanionEditor();
     });
   }
+}
+
+function applySidebarState() {
+  const container = document.getElementById('chatAppContainer');
+  const toggleBtn = document.getElementById('sidebarToggleBtn');
+  if (!container || !toggleBtn) return;
+
+  container.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+  toggleBtn.style.display = sidebarCollapsed ? 'inline-flex' : 'none';
 }
 
 async function refreshCompanions() {
@@ -885,6 +908,9 @@ function renderCompanionsSidebar() {
   }
 
   companions.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = `history-row${c.id === currentCompanionId ? ' active' : ''}`;
+
     const item = document.createElement('button');
     item.className = `history-item${c.id === currentCompanionId ? ' active' : ''}`;
     item.type = 'button';
@@ -892,17 +918,66 @@ function renderCompanionsSidebar() {
     item.addEventListener('click', async () => {
       await loadCompanionMessages(c.id);
     });
-    listEl.appendChild(item);
+
+    const menuWrap = document.createElement('div');
+    menuWrap.className = 'companion-menu';
+
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'companion-menu-btn';
+    menuBtn.innerHTML = '&#8942;';
+    menuBtn.setAttribute('aria-label', `More actions for ${c.name || `Companion ${c.id}`}`);
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.companion-menu.open').forEach((el) => {
+        if (el !== menuWrap) el.classList.remove('open');
+      });
+      menuWrap.classList.toggle('open');
+    });
+
+    const menuPanel = document.createElement('div');
+    menuPanel.className = 'companion-menu-panel';
+
+    const editAction = document.createElement('button');
+    editAction.type = 'button';
+    editAction.className = 'companion-menu-action';
+    editAction.textContent = 'Edit';
+    editAction.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menuWrap.classList.remove('open');
+      openCompanionEditor(c.id);
+    });
+
+    const deleteAction = document.createElement('button');
+    deleteAction.type = 'button';
+    deleteAction.className = 'companion-menu-action danger';
+    deleteAction.textContent = 'Delete';
+    deleteAction.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      menuWrap.classList.remove('open');
+      await deleteCurrentCompanion(c.id);
+    });
+
+    menuPanel.appendChild(editAction);
+    menuPanel.appendChild(deleteAction);
+    menuWrap.appendChild(menuBtn);
+    menuWrap.appendChild(menuPanel);
+
+    row.appendChild(item);
+    row.appendChild(menuWrap);
+    listEl.appendChild(row);
   });
 }
 
-function openCompanionEditor() {
-  if (!currentCompanionId) {
+function openCompanionEditor(companionId = null) {
+  const targetId = companionId || currentCompanionId;
+  if (!targetId) {
     showToast('Select a companion first');
     return;
   }
 
-  const row = companions.find((c) => c.id === currentCompanionId);
+  currentCompanionId = targetId;
+  const row = companions.find((c) => c.id === targetId);
   if (!row) {
     showToast('Companion not found');
     return;
@@ -1000,22 +1075,25 @@ async function saveCompanionEdits() {
   }
 }
 
-async function deleteCurrentCompanion() {
-  if (!currentCompanionId) {
+async function deleteCurrentCompanion(companionId = null) {
+  const targetId = companionId || currentCompanionId;
+  if (!targetId) {
     showToast('Select a companion first');
     return;
   }
   if (!confirm('Delete this companion and all linked chat?')) return;
 
   try {
-    const res = await fetch(`/api/companions/${currentCompanionId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/companions/${targetId}`, { method: 'DELETE' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) {
       showToast(data.error || 'Could not delete companion');
       return;
     }
 
-    currentCompanionId = null;
+    if (currentCompanionId === targetId) {
+      currentCompanionId = null;
+    }
     profileVoiceId = '';
     await refreshCompanions();
 
@@ -1086,24 +1164,6 @@ async function loadCompanionMessages(companionId) {
   renderCompanionsSidebar();
 }
 
-async function sendBotGreeting() {
-  const greetings = {
-    'hi-IN': `Arre, ${profile.nickname}! Aa gaye aakhir. Bahut yaad aa rahi thi tumhari…`,
-    'bn-IN': `Arre, ${profile.nickname}! Ele aakhere. Tomar jonyo onek miss korchilam…`,
-    'ta-IN': `Enda, ${profile.nickname}! Vanduttae! Romba neram kaanalaaye…`,
-    'te-IN': `Arre, ${profile.nickname}! Vachavu! Chala naalugaa chusala ledu…`,
-    'kn-IN': `Arre, ${profile.nickname}! Bandhe! Thumba dinagala nanthara noduthiddene…`,
-    'ml-IN': `Eda, ${profile.nickname}! Vannu! Kure naalaayi kaanam kaathu irunnillu…`,
-    'mr-IN': `Arre, ${profile.nickname}! Aalas tu! Kitikhel yewaytoy tula…`,
-    'gu-IN': `Are, ${profile.nickname}! Aavyo tu! Kitiyo samay thi raha hato…`,
-    'pa-IN': `Are, ${profile.nickname}! Aa gaye tu! Bahut wait ki teri…`,
-    'en-IN': `Oh ${profile.nickname}, you're here! I've missed you so much…`,
-  };
-  const greet = greetings[profile.language] || greetings['hi-IN'];
-  chatHistory.push({ role: 'assistant', content: greet });
-  appendMessage('bot', greet, true);
-}
-
 // ══════════════════════════════
 // SEND MESSAGE
 // ══════════════════════════════
@@ -1154,43 +1214,53 @@ async function getBotReply() {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       console.error('Chat API error:', err);
-      const fallback = getFallbackMsg();
-      chatHistory.push({ role: 'assistant', content: fallback });
-      appendMessage('bot', fallback, true);
-      showToast(t('err_api'));
+      showToast(err.error || t('err_api'));
       return;
     }
 
     const data = await res.json();
-    const reply = data.reply || getFallbackMsg();
+    const reply = data.reply || '';
+    if (!reply) {
+      showToast(t('err_api'));
+      return;
+    }
     chatHistory.push({ role: 'assistant', content: reply });
     appendMessage('bot', reply, true);
   } catch (err) {
     removeTyping(typingId);
     console.error('Network error:', err);
-    const fallback = getFallbackMsg();
-    chatHistory.push({ role: 'assistant', content: fallback });
-    appendMessage('bot', fallback, true);
     showToast('Server se connect nahi ho saka. Python server chal raha hai?');
   }
 }
 
-async function ensureAuthenticated() {
+async function ensureAuthenticated(redirectOnFail = true) {
   try {
     const res = await fetch('/api/me');
     if (!res.ok) {
-      window.location.href = '/login';
+      if (redirectOnFail) {
+        localStorage.setItem('saathi_post_login_action', 'get-started');
+        window.location.href = '/login';
+      }
+      currentUser = null;
       return false;
     }
     const data = await res.json().catch(() => ({}));
     if (!data.ok || !data.authenticated) {
-      window.location.href = '/login';
+      if (redirectOnFail) {
+        localStorage.setItem('saathi_post_login_action', 'get-started');
+        window.location.href = '/login';
+      }
+      currentUser = null;
       return false;
     }
     currentUser = data.user || null;
     return true;
   } catch (_) {
-    window.location.href = '/login';
+    if (redirectOnFail) {
+      localStorage.setItem('saathi_post_login_action', 'get-started');
+      window.location.href = '/login';
+    }
+    currentUser = null;
     return false;
   }
 }
@@ -1209,15 +1279,54 @@ function bindTopbarNavActions() {
       window.location.href = '/login';
     });
   }
+
 }
 
-function getFallbackMsg() {
-  const msgs = {
-    'hi-IN': ['Haan, sun raha/rahi hoon beta…', 'Theek ho na tum?', 'Sochta/sochti hoon tumhare baare mein hamesha.'],
-    'en-IN': ['Yes, I hear you…', 'Are you okay?', 'I always think about you.'],
-  };
-  const arr = msgs[profile.language] || msgs['hi-IN'];
-  return arr[Math.floor(Math.random() * arr.length)];
+function updateAuthUI(isAuthed) {
+  const logoutBtn = document.getElementById('logoutNavBtn');
+  if (logoutBtn) logoutBtn.style.display = isAuthed ? 'inline-flex' : 'none';
+}
+
+function setSpeakButtonIdle(btn) {
+  if (!btn) return;
+  btn.dataset.state = 'idle';
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> ${uiLang === 'hi' ? 'Suno' : 'Play'}`;
+}
+
+function setSpeakButtonStop(btn) {
+  if (!btn) return;
+  btn.dataset.state = 'playing';
+  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg> ${uiLang === 'hi' ? 'Roko' : 'Stop'}`;
+}
+
+function stopCurrentAudio(forceToast = false) {
+  if (currentAudio) {
+    try {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    } catch (_) {
+      // ignore
+    }
+    currentAudio = null;
+  }
+  if (currentAudioUrl) {
+    try {
+      URL.revokeObjectURL(currentAudioUrl);
+    } catch (_) {
+      // ignore
+    }
+    currentAudioUrl = null;
+  }
+  if (currentSpeakBtn) {
+    setSpeakButtonIdle(currentSpeakBtn);
+    currentSpeakBtn = null;
+  }
+  // Only clear pending when explicitly stopping (not on normal completion)
+  if (forceToast) {
+    pendingAudioBase64 = null;
+    pendingAudioButton = null;
+    showToast(uiLang === 'hi' ? 'Audio roka gaya' : 'Audio stopped');
+  }
 }
 
 // ══════════════════════════════
@@ -1225,6 +1334,23 @@ function getFallbackMsg() {
 // ══════════════════════════════
 async function speakText(text, btnEl) {
   if (!text) return;
+
+  if (currentAudio && currentSpeakBtn === btnEl) {
+    stopCurrentAudio(true);
+    return;
+  }
+
+  stopCurrentAudio(false);
+
+  // Unlock AudioContext immediately within gesture context
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+  } catch (_) {
+    // Ignore unlock errors; playback path handles fallback.
+  }
 
   // Visual loading state on the clicked button
   if (btnEl) {
@@ -1248,9 +1374,16 @@ async function speakText(text, btnEl) {
       }),
     });
 
-    if (!res.ok) { showToast(t('toast_tts_fail')); return; }
+    if (!res.ok) { 
+      showToast(t('toast_tts_fail')); 
+      return; 
+    }
+    
     const data = await res.json();
-    if (!data.ok || !data.audio) { showToast(t('toast_tts_fail')); return; }
+    if (!data.ok || !data.audio) { 
+      showToast(t('toast_tts_fail')); 
+      return; 
+    }
 
     if (data.voice_cloned) {
       updateCloneBadge('on');
@@ -1268,17 +1401,41 @@ async function speakText(text, btnEl) {
       showToast(uiLang === 'hi' ? 'Voice clone model warm-up ho raha hai, thoda wait karo…' : 'Voice clone model is warming up, please wait...');
     }
 
+    // Decode audio data
     const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
     const blob = new Blob([audioBytes], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
+    
+    // Create and play audio
     const audio = new Audio(url);
-    audio.onended = () => { URL.revokeObjectURL(url); };
-    try { await audio.play(); } catch (playErr) {
-      // Browser may block playback after async work; queue for next user gesture.
-      console.warn('Autoplay blocked:', playErr);
-      pendingAudioUrl = url;
-      showToast(uiLang === 'hi' ? 'Audio allow karne ke liye screen par ek baar tap/click karo.' : 'Tap/click once anywhere to allow audio playback.');
-      return;
+    currentAudio = audio;
+    currentAudioUrl = url;
+    currentSpeakBtn = btnEl || null;
+    setSpeakButtonStop(btnEl);
+
+    audio.onended = () => {
+      stopCurrentAudio(false);
+    };
+    
+    // Try to play immediately
+    try {
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        await playPromise;
+      }
+      audioPlaybackUnlocked = true;
+    } catch (playErr) {
+      // Playback blocked - store base64 for retry on next gesture
+      pendingAudioBase64 = data.audio;
+      pendingAudioButton = btnEl;
+      currentAudio = null;
+      if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+      currentAudioUrl = null;
+      if (currentSpeakBtn) {
+        setSpeakButtonIdle(currentSpeakBtn);
+        currentSpeakBtn = null;
+      }
+      showToast(uiLang === 'hi' ? 'Playback block hua, dusre click par try hoga.' : 'Playback blocked. Try clicking again.');
     }
   } catch (e) {
     console.error('TTS error:', e);
@@ -1288,7 +1445,9 @@ async function speakText(text, btnEl) {
     if (btnEl) {
       btnEl.disabled = false;
       btnEl.style.opacity = '';
-      btnEl.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:11px;height:11px"><path d="M8 5v14l11-7z"/></svg> ${uiLang === 'hi' ? 'Suno' : 'Play'}`;
+      if (btnEl.dataset.state !== 'playing') {
+        setSpeakButtonIdle(btnEl);
+      }
     }
   }
 }
@@ -1462,21 +1621,90 @@ function bindAudioUnlockHandlers() {
   audioUnlockHandlersBound = true;
 
   const tryPlayPending = async () => {
-    if (!pendingAudioUrl) return;
-    const url = pendingAudioUrl;
-    pendingAudioUrl = null;
-    const audio = new Audio(url);
-    audio.onended = () => { URL.revokeObjectURL(url); };
+    if (!pendingAudioBase64) return;
+    
+    // Unlock AudioContext on any gesture
     try {
-      await audio.play();
-    } catch {
-      // Keep silent here; user can tap play button again if needed.
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+    } catch (_) {
+      // ignore
+    }
+    
+    const base64Data = pendingAudioBase64;
+    const btn = pendingAudioButton;
+    
+    // Clear pending state AFTER capturing references
+    pendingAudioBase64 = null;
+    pendingAudioButton = null;
+    
+    if (!base64Data) return;
+    
+    // Decode base64 and create fresh blob for playback
+    try {
+      const audioBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+      const blob = new Blob([audioBytes], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio = audio;
+      currentAudioUrl = url;
+      currentSpeakBtn = btn;
+      
+      if (btn) {
+        setSpeakButtonStop(btn);
+      }
+      
+      audio.onended = () => { 
+        URL.revokeObjectURL(url);
+        stopCurrentAudio(false);
+      };
+      
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        currentAudio = null;
+        currentAudioUrl = null;
+      };
+      
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        await playPromise;
+      }
+      audioPlaybackUnlocked = true;
+    } catch (err) {
+      // Still blocked or decode error - try again on next gesture
+      pendingAudioBase64 = base64Data; // Restore for next retry
+      pendingAudioButton = btn;
+      currentAudio = null;
+      if (currentAudioUrl) {
+        URL.revokeObjectURL(currentAudioUrl);
+        currentAudioUrl = null;
+      }
+      if (btn) {
+        setSpeakButtonIdle(btn);
+      }
+      currentSpeakBtn = null;
     }
   };
 
-  ['click', 'keydown', 'touchstart'].forEach(evt => {
+  ['click', 'keydown', 'touchstart', 'pointerdown'].forEach(evt => {
     document.addEventListener(evt, tryPlayPending, { passive: true });
   });
+}
+
+async function primeAudioPlayback() {
+  // Try to unlock AudioContext which gives better autoplay support
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+  } catch (_) {
+    // AudioContext not available, continue with fallback
+  }
+  audioPlaybackUnlocked = true;
+  return true;
 }
 
 // ══════════════════════════════
@@ -1570,15 +1798,31 @@ function closeLangDropdown() {
 // INIT
 // ══════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
-  const ok = await ensureAuthenticated();
-  if (!ok) return;
+  const isAuthed = await ensureAuthenticated(false);
 
   bindTopbarNavActions();
+  updateAuthUI(isAuthed);
 
   initTheme();
   initUiLang();
   bindAudioUnlockHandlers();
-  startIntroSequence();
+  sidebarCollapsed = localStorage.getItem('saathi_sidebar_collapsed') === '1';
+  applySidebarState();
+
+  const autostart = new URLSearchParams(window.location.search).get('autostart') === '1';
+  const pendingAction = localStorage.getItem('saathi_post_login_action');
+  if (isAuthed && (autostart || pendingAction === 'get-started')) {
+    localStorage.removeItem('saathi_post_login_action');
+    clearIntroTimers();
+    showScreen('landingScreen');
+    initLandingAnimations();
+    await handleGetStarted();
+    if (autostart) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  } else {
+    startIntroSequence();
+  }
 
   // Click anywhere on intro stage to skip (except the enter button)
   const introStage = document.getElementById('introStage');
@@ -1592,6 +1836,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Close language dropdown when clicking outside
   document.addEventListener('click', (e) => {
+    if (!e.target.closest('.companion-menu')) {
+      document.querySelectorAll('.companion-menu.open').forEach((el) => el.classList.remove('open'));
+    }
     if (!e.target.closest('.lang-dropdown')) {
       closeLangDropdown();
     }

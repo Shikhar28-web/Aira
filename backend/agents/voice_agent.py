@@ -36,6 +36,7 @@ import base64
 import io
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -92,8 +93,12 @@ def _pick_voice_name_by_gender(voice_names: list[str], gender_hint: str | None) 
     if not names:
         return None
 
-    male_tokens = ("male", "man", "boy", "karun", "hitesh", "abhilash", "arya")
-    female_tokens = ("female", "woman", "girl", "anushka", "manisha", "vidya", "sarah", "anna")
+    male_tokens = (
+        "male", "man", "boy", "karun", "hitesh", "abhilash", "arya", "alex", "daniel", "rishi", "rahul",
+    )
+    female_tokens = (
+        "female", "woman", "girl", "anushka", "manisha", "vidya", "sarah", "anna", "samantha", "veena", "karen", "zira",
+    )
     tokens = male_tokens if gender_hint == "male" else female_tokens
 
     for name in names:
@@ -103,6 +108,8 @@ def _pick_voice_name_by_gender(voice_names: list[str], gender_hint: str | None) 
 
     # Fallback so male/female still sound different when names are unknown.
     names_sorted = sorted(names, key=lambda v: v.lower())
+    if len(names_sorted) == 1:
+        return names_sorted[0]
     return names_sorted[-1] if gender_hint == "male" else names_sorted[0]
 
 
@@ -162,6 +169,8 @@ class VoiceAgent:
         )
         os.makedirs(self._assets_dir, exist_ok=True)
         self._speaker_wav = os.path.join(self._assets_dir, "default_speaker.wav")
+        self._speaker_wav_female = os.path.join(self._assets_dir, "default_speaker_female.wav")
+        self._speaker_wav_male = os.path.join(self._assets_dir, "default_speaker_male.wav")
 
     # ── Public API ─────────────────────────────────────────────────────────
 
@@ -201,6 +210,19 @@ class VoiceAgent:
         gender_hint = _normalize_gender_hint(speaker)
 
         clone_requested = bool(speaker_wav and os.path.exists(speaker_wav))
+
+        # For explicit male/female selection without clone sample, prefer
+        # native system voices first for clearer gender separation.
+        if not clone_requested and gender_hint in {"male", "female"}:
+            native_audio = self._pyttsx3_synthesize(
+                pause_text,
+                gender_hint=gender_hint,
+                language_code=language_code,
+            )
+            if native_audio:
+                print(f"[VoiceAgent] Using native {gender_hint} system voice (non-clone path).")
+                return native_audio, False
+
         if clone_requested and VoiceAgent._xtts_model is None:
             # For clone requests, prefer a blocking XTTS load once so first
             # cloned reply is actually cloned instead of immediate fallback voice.
@@ -219,7 +241,7 @@ class VoiceAgent:
                 )
             except Exception as exc:
                 print(f"[VoiceAgent] XTTS error: {exc}. Falling back to pyttsx3.")
-                fallback = self._pyttsx3_synthesize(pause_text, gender_hint=gender_hint)
+                fallback = self._pyttsx3_synthesize(pause_text, gender_hint=gender_hint, language_code=language_code)
                 if fallback:
                     return fallback, False
                 return self._windows_system_speech_synthesize(pause_text), False
@@ -235,7 +257,7 @@ class VoiceAgent:
             self._last_xtts_attempt_ts = time.time()
             threading.Thread(target=self._load_xtts_background, daemon=True).start()
 
-        audio = self._pyttsx3_synthesize(pause_text, gender_hint=gender_hint)
+        audio = self._pyttsx3_synthesize(pause_text, gender_hint=gender_hint, language_code=language_code)
         if audio:
             return audio, False
         return self._windows_system_speech_synthesize(pause_text), False
@@ -352,13 +374,26 @@ class VoiceAgent:
     ) -> tuple[str | None, bool]:
         lang = _XTTS_LANG.get(language_code, "hi")
 
-        speaker_ref = speaker_wav if speaker_wav and os.path.exists(speaker_wav) else self._speaker_wav
+        # Clone sample takes absolute priority when provided.
+        if speaker_wav and os.path.exists(speaker_wav):
+            speaker_ref = speaker_wav
+        else:
+            if gender_hint == "male":
+                speaker_ref = self._speaker_wav_male
+            elif gender_hint == "female":
+                speaker_ref = self._speaker_wav_female
+            else:
+                speaker_ref = self._speaker_wav
 
         # Ensure default reference speaker WAV exists
         if not os.path.exists(speaker_ref):
-            if not self._generate_speaker_wav():
+            if not self._generate_speaker_wav(gender_hint=gender_hint, language_code=language_code, out_path=speaker_ref):
                 raise RuntimeError("Cannot create default speaker WAV.")
-            speaker_ref = self._speaker_wav
+            if not os.path.exists(speaker_ref):
+                # Last-resort fallback to neutral default file.
+                speaker_ref = self._speaker_wav
+                if not os.path.exists(speaker_ref) and not self._generate_speaker_wav():
+                    raise RuntimeError("Cannot create neutral default speaker WAV.")
 
         kwargs = {
             "text": text,
@@ -410,7 +445,12 @@ class VoiceAgent:
         cloned = bool(speaker_wav and os.path.exists(speaker_wav))
         return _array_to_wav_b64(wav, _XTTS_SAMPLE_RATE), cloned
 
-    def _generate_speaker_wav(self) -> bool:
+    def _generate_speaker_wav(
+        self,
+        gender_hint: str | None = None,
+        language_code: str | None = None,
+        out_path: str | None = None,
+    ) -> bool:
         """
         Generate a short default-speaker WAV with pyttsx3.
         This reference audio is used by XTTS v2 to clone a neutral voice.
@@ -419,21 +459,134 @@ class VoiceAgent:
             import pyttsx3  # noqa: PLC0415
 
             engine = pyttsx3.init()
+            self._pick_pyttsx3_voice(engine, gender_hint=gender_hint, language_code=language_code)
             engine.setProperty("rate", 150)
+            target = out_path or self._speaker_wav
             engine.save_to_file(
                 "Hello, I am SarvSathi, your intelligent AI assistant.",
-                self._speaker_wav,
+                target,
             )
             engine.runAndWait()
-            return os.path.exists(self._speaker_wav)
+            return os.path.exists(target)
         except Exception as exc:
             print(f"[VoiceAgent] Speaker WAV generation failed: {exc}")
             return False
 
+    @staticmethod
+    def _pick_pyttsx3_voice(engine, gender_hint: str | None = None, language_code: str | None = None) -> None:
+        voices = engine.getProperty("voices") or []
+        if not voices:
+            return
+
+        lang_tokens = []
+        code = (language_code or "").lower()
+        if code.startswith("hi"):
+            lang_tokens = ["hi_in", "hindi", "india", "en_in"]
+        elif code.startswith("en"):
+            lang_tokens = ["en_in", "en_us", "en_gb", "english"]
+
+        male_tokens = ("male", "man", "aman", "daniel", "rishi", "rahul")
+        female_tokens = ("female", "woman", "soumya", "samantha", "veena", "karen", "zira", "anna", "alice")
+        wanted_tokens = male_tokens if gender_hint == "male" else female_tokens
+        preferred_by_gender = {
+            "male": ("aman", "rishi", "daniel", "rahul", "alex"),
+            "female": ("soumya", "veena", "samantha", "anna", "alice", "zira"),
+        }
+
+        def blob(v):
+            return (
+                f"{getattr(v, 'name', '')} "
+                f"{getattr(v, 'id', '')} "
+                f"{getattr(v, 'languages', '')} "
+                f"{getattr(v, 'gender', '')}"
+            ).lower()
+
+        # 1) language + gender
+        if gender_hint in {"male", "female"} and lang_tokens:
+            for pref in preferred_by_gender.get(gender_hint, ()): 
+                for v in voices:
+                    b = blob(v)
+                    if pref in b and any(l in b for l in lang_tokens):
+                        engine.setProperty("voice", getattr(v, "id"))
+                        return
+            for v in voices:
+                b = blob(v)
+                if any(l in b for l in lang_tokens) and any(t in b for t in wanted_tokens):
+                    engine.setProperty("voice", getattr(v, "id"))
+                    return
+
+        # 2) gender-only
+        if gender_hint in {"male", "female"}:
+            for v in voices:
+                b = blob(v)
+                if any(t in b for t in wanted_tokens):
+                    engine.setProperty("voice", getattr(v, "id"))
+                    return
+
+        # 3) language-only fallback
+        if lang_tokens:
+            for v in voices:
+                b = blob(v)
+                if any(l in b for l in lang_tokens):
+                    engine.setProperty("voice", getattr(v, "id"))
+                    return
+
     # ── pyttsx3 fallback ────────────────────────────────────────────────────
 
     @staticmethod
-    def _pyttsx3_synthesize(text: str, gender_hint: str | None = None) -> str | None:
+    def _read_audio_as_browser_wav(audio_path: str) -> bytes | None:
+        """Return PCM WAV bytes; convert AIFF/AIFF-C on macOS when needed."""
+        try:
+            with open(audio_path, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            return None
+
+        if raw[:4] == b"RIFF" and raw[8:12] == b"WAVE":
+            return raw
+
+        # macOS NSSpeech often writes AIFF-C even when .wav extension is used.
+        if raw[:4] == b"FORM" and sys.platform == "darwin":
+            out_path: str | None = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as out:
+                    out_path = out.name
+                subprocess.run(
+                    ["afconvert", "-f", "WAVE", "-d", "LEI16", audio_path, out_path],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                with open(out_path, "rb") as wf:
+                    converted = wf.read()
+                if converted[:4] == b"RIFF" and converted[8:12] == b"WAVE":
+                    return converted
+            except Exception as exc:
+                print(f"[VoiceAgent] afconvert WAV normalization failed: {exc}")
+            finally:
+                if out_path and os.path.exists(out_path):
+                    try:
+                        os.unlink(out_path)
+                    except OSError:
+                        pass
+
+        return raw
+
+    @staticmethod
+    def _pyttsx3_synthesize(
+        text: str,
+        gender_hint: str | None = None,
+        language_code: str | None = None,
+    ) -> str | None:
+        # pyttsx3 on macOS can return tiny/silent audio when called from
+        # non-main threads (Flask threaded requests). Delegate to subprocess.
+        if sys.platform == "darwin" and threading.current_thread() is not threading.main_thread():
+            return VoiceAgent._pyttsx3_synthesize_subprocess(
+                text,
+                gender_hint=gender_hint,
+                language_code=language_code,
+            )
+
         tmp: str | None = None
         try:
             import pyttsx3  # noqa: PLC0415
@@ -441,21 +594,11 @@ class VoiceAgent:
             engine = pyttsx3.init()
             engine.setProperty("rate",   205)
             engine.setProperty("volume", 0.90)
-
-            # Best-effort gender voice selection in fallback engine.
-            voices = engine.getProperty("voices") or []
-            if voices and gender_hint in {"male", "female"}:
-                chosen_id = None
-                for v in voices:
-                    blob = f"{getattr(v, 'name', '')} {getattr(v, 'id', '')}".lower()
-                    if gender_hint == "male" and re.search(r"\bmale\b|\bman\b", blob):
-                        chosen_id = getattr(v, "id", None)
-                        break
-                    if gender_hint == "female" and re.search(r"\bfemale\b|\bwoman\b", blob):
-                        chosen_id = getattr(v, "id", None)
-                        break
-                if chosen_id:
-                    engine.setProperty("voice", chosen_id)
+            VoiceAgent._pick_pyttsx3_voice(
+                engine,
+                gender_hint=gender_hint,
+                language_code=language_code,
+            )
 
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fh:
                 tmp = fh.name
@@ -463,8 +606,10 @@ class VoiceAgent:
             engine.save_to_file(text, tmp)
             engine.runAndWait()
 
-            with open(tmp, "rb") as fh:
-                return base64.b64encode(fh.read()).decode("utf-8")
+            wav_bytes = VoiceAgent._read_audio_as_browser_wav(tmp)
+            if not wav_bytes:
+                return None
+            return base64.b64encode(wav_bytes).decode("utf-8")
 
         except Exception as exc:
             print(f"[VoiceAgent] pyttsx3 error: {exc}")
@@ -475,6 +620,132 @@ class VoiceAgent:
                     os.unlink(tmp)
                 except OSError:
                     pass
+
+    @staticmethod
+    def _pyttsx3_synthesize_subprocess(
+        text: str,
+        gender_hint: str | None = None,
+        language_code: str | None = None,
+    ) -> str | None:
+        """Run pyttsx3 in a subprocess to avoid macOS threaded synthesis issues."""
+        script = r'''
+import base64
+import os
+import sys
+import tempfile
+import pyttsx3
+import subprocess
+
+text = sys.argv[1]
+gender = (sys.argv[2] or '').lower()
+lang = (sys.argv[3] or '').lower()
+
+engine = pyttsx3.init()
+engine.setProperty('rate', 205)
+engine.setProperty('volume', 0.90)
+voices = engine.getProperty('voices') or []
+
+lang_tokens = []
+if lang.startswith('hi'):
+    lang_tokens = ['hi_in', 'hindi', 'india', 'en_in']
+elif lang.startswith('en'):
+    lang_tokens = ['en_in', 'en_us', 'en_gb', 'english']
+
+male_tokens = ('male', 'man', 'aman', 'daniel', 'rishi', 'rahul')
+female_tokens = ('female', 'woman', 'soumya', 'samantha', 'veena', 'karen', 'zira', 'anna', 'alice')
+preferred = {
+    'male': ('aman', 'rishi', 'daniel', 'rahul', 'alex'),
+    'female': ('soumya', 'veena', 'samantha', 'anna', 'alice', 'zira'),
+}
+want = male_tokens if gender == 'male' else female_tokens
+
+def blob(v):
+    return f"{getattr(v, 'name', '')} {getattr(v, 'id', '')} {getattr(v, 'languages', '')} {getattr(v, 'gender', '')}".lower()
+
+chosen = None
+if gender in ('male', 'female') and lang_tokens:
+    for pref in preferred.get(gender, ()):
+        for v in voices:
+            b = blob(v)
+            if pref in b and any(t in b for t in lang_tokens):
+                chosen = getattr(v, 'id', None)
+                break
+        if chosen:
+            break
+
+if not chosen and gender in ('male', 'female') and lang_tokens:
+    for v in voices:
+        b = blob(v)
+        if any(t in b for t in lang_tokens) and any(t in b for t in want):
+            chosen = getattr(v, 'id', None)
+            break
+
+if not chosen and gender in ('male', 'female'):
+    for v in voices:
+        b = blob(v)
+        if any(t in b for t in want):
+            chosen = getattr(v, 'id', None)
+            break
+
+if not chosen and lang_tokens:
+    for v in voices:
+        b = blob(v)
+        if any(t in b for t in lang_tokens):
+            chosen = getattr(v, 'id', None)
+            break
+
+if chosen:
+    engine.setProperty('voice', chosen)
+
+with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as fh:
+    tmp = fh.name
+
+out_wav = None
+
+try:
+    engine.save_to_file(text, tmp)
+    engine.runAndWait()
+
+    with open(tmp, 'rb') as rf:
+        raw = rf.read()
+
+    # Normalize AIFF/AIFF-C to PCM WAV for browser compatibility.
+    if raw[:4] == b'FORM' and sys.platform == 'darwin':
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as out:
+            out_wav = out.name
+        subprocess.run(
+            ['afconvert', '-f', 'WAVE', '-d', 'LEI16', tmp, out_wav],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        with open(out_wav, 'rb') as wf:
+            raw = wf.read()
+
+    sys.stdout.write(base64.b64encode(raw).decode('utf-8'))
+finally:
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    if out_wav:
+        try:
+            os.unlink(out_wav)
+        except OSError:
+            pass
+'''
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-c", script, text, gender_hint or "", language_code or ""],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            out = (proc.stdout or "").strip()
+            return out or None
+        except Exception as exc:
+            print(f"[VoiceAgent] pyttsx3 subprocess error: {exc}")
+            return None
 
     @staticmethod
     def _windows_system_speech_synthesize(text: str) -> str | None:

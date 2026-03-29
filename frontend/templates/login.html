@@ -69,7 +69,13 @@
           setError(data.error || 'Authentication failed');
           return;
         }
-        window.location.href = '/';
+        const pending = localStorage.getItem('saathi_post_login_action');
+        if (pending === 'get-started') {
+          localStorage.removeItem('saathi_post_login_action');
+          window.location.href = '/?autostart=1';
+        } else {
+          window.location.href = '/';
+        }
       } catch (e) {
         setError('Server error. Try again.');
       }

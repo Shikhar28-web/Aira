@@ -81,6 +81,7 @@ The current codebase has moved to local/offline-first agents and Ollama/Whisper/
 
 - Persona-based conversation setup (name, relation, style, phrases, nickname)
 - Conditional onboarding from landing page:
+  - Login is requested only when user clicks Get Started
   - New users (no companions) go through full persona setup
   - Returning users go directly to chat with saved companions in sidebar
 - Add Companion now uses the same full persona setup flow
@@ -89,6 +90,7 @@ The current codebase has moved to local/offline-first agents and Ollama/Whisper/
   - Upload or replace companion voice sample
   - Delete companion directly from chat UI
 - Text chat and voice chat UI
+- Stop-audio control in chat header to halt current TTS playback
 - Multilingual UI modes (`en`, `hi`, `hinglish`)
 - Speech-to-text transcription endpoint
 - Text-to-speech response endpoint
