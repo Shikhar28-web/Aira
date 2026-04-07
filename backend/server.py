@@ -47,14 +47,15 @@ from db import (
 # ── Config from environment (all optional — sensible defaults) ────────────────
 _DEVICE       = os.getenv("SARVSATHI_DEVICE",  "cpu")
 _WHISPER_MODEL = os.getenv("WHISPER_MODEL",    "medium")
-_OLLAMA_MODEL  = os.getenv("OLLAMA_MODEL",     "qwen2.5:7b-instruct")
-_OLLAMA_URL    = os.getenv("OLLAMA_URL",       "http://localhost:11434")
+_GROQ_MODEL    = os.getenv("GROQ_MODEL",       "llama-3.1-8b-instant")
+_GROQ_API_KEY  = os.getenv("GROQ_API_KEY",     "")
+_GROQ_URL      = os.getenv("GROQ_URL",         "https://api.groq.com/openai/v1/chat/completions")
 _WAKE_ENABLED  = os.getenv("SARVSATHI_WAKE",   "true").lower() in {"1", "true", "yes"}
 _PROFILE_TRANSCRIBE = os.getenv("SARVSATHI_PROFILE_TRANSCRIBE", "false").lower() in {"1", "true", "yes"}
 
 # ── Initialise agents (models are lazy-loaded on first use) ───────────────────
 _listener = ListenerAgent(model_size=_WHISPER_MODEL, device=_DEVICE)
-_brain    = BrainAgent(model=_OLLAMA_MODEL, ollama_url=_OLLAMA_URL)
+_brain    = BrainAgent(model=_GROQ_MODEL, groq_api_key=_GROQ_API_KEY)
 _voice    = VoiceAgent(device=_DEVICE)
 _wake     = WakeAgent() if _WAKE_ENABLED else None
 
@@ -87,6 +88,35 @@ def _strip_think(text: str) -> str:
     if "<think" not in text.lower():
         return text
     return re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip() or text
+
+
+def _infer_relationship(companion_name: str) -> str:
+    """Infer relationship label from companion name for better tone control."""
+    low = (companion_name or "").strip().lower()
+    if any(k in low for k in ["maa", "mummy", "mom", "mother"]):
+        return "mother"
+    if any(k in low for k in ["papa", "dad", "father"]):
+        return "father"
+    if any(k in low for k in ["didi", "behen", "sister"]):
+        return "sister"
+    if any(k in low for k in ["bhai", "brother", "bro"]):
+        return "brother"
+    if any(k in low for k in ["friend", "dost", "yaar"]):
+        return "friend"
+    return "loved one"
+
+
+def _style_guideline(style: str) -> str:
+    st = (style or "casual").strip().lower()
+    if st == "formal":
+        return "Use polite, respectful wording and clear sentence structure without slang."
+    if st == "supportive":
+        return "Sound gentle and emotionally present, validate feelings before giving advice."
+    if st == "motivational":
+        return "Be energizing and hopeful, with practical next steps and confidence-building tone."
+    if st == "fun":
+        return "Keep it playful and light while staying sensible, never childish or mocking."
+    return "Use relaxed everyday wording like a close real person in conversation."
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -270,7 +300,7 @@ def status():
         "ok": True,
         "device":        _DEVICE,
         "whisper_model": _WHISPER_MODEL,
-        "llm_model":     _OLLAMA_MODEL,
+        "llm_model":     _GROQ_MODEL,
         "wake_enabled":  _WAKE_ENABLED,
         "voice_clone_ready": _voice.is_clone_ready(),
     })
@@ -621,13 +651,25 @@ def chat():
         # If selected companion exists, inject persona into system prompt.
         if selected_companion:
             companion_name = (selected_companion.get("name") or "Companion").strip()
-            companion_style = (selected_companion.get("style") or "casual").strip()
-            preferred_language = (selected_companion.get("language") or "hinglish").strip()
+            companion_style = (selected_companion.get("style") or "casual").strip().lower()
+            preferred_language = (selected_companion.get("language") or "hinglish").strip().lower()
+            relationship = _infer_relationship(companion_name)
+            nickname = (session.get("username") or "dost").strip() or "dost"
+            tone_rule = _style_guideline(companion_style)
             system_prompt = (
                 f"{system_prompt}\n\n"
-                f"You are {companion_name}, a {companion_style} AI companion. "
-                f"Preferred language for neutral chats: {preferred_language}. "
-                f"Always mirror the user's latest language and script choice in your reply."
+                "Companion Persona:\n"
+                f"- Name: {companion_name}\n"
+                f"- Relationship to user: {relationship}\n"
+                f"- Personality style: {companion_style}\n"
+                f"- Preferred neutral language: {preferred_language}\n"
+                f"- You must always call them: \"{nickname}\"\n\n"
+                "Conversation Rules:\n"
+                f"- {tone_rule}\n"
+                "- Sound like a real human: warm, natural, and context-aware phrasing.\n"
+                "- Never sound robotic; avoid assistant disclaimers and repetitive templates.\n"
+                "- Mirror the user's latest language and script choice in every reply.\n"
+                "- Keep factual answers accurate and direct; for emotional chats be empathetic without inventing events."
             )
 
         # Call brain agent with structured pipeline
@@ -864,7 +906,7 @@ if __name__ == "__main__":
     print("  SarvSathi \u2014 Fully Offline AI Assistant")
     print(f"  Device        : {_DEVICE}")
     print(f"  Whisper model : {_WHISPER_MODEL}")
-    print(f"  LLM           : {_OLLAMA_MODEL}  @  {_OLLAMA_URL}")
+    print(f"  LLM           : {_GROQ_MODEL}  @  {_GROQ_URL}")
     print(f"  Wake word     : {'enabled' if _WAKE_ENABLED else 'disabled'}")
     print("=" * 60)
     print(f"\n  Open in browser: http://{host}:{port}")

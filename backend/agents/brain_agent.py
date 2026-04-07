@@ -19,11 +19,10 @@ Output schema::
     }
 """
 
+import os
 import re
 import random
-import threading
 import time
-import json
 from typing import Any
 
 import requests
@@ -354,41 +353,30 @@ def _get_safety_response(persona: dict[str, str]) -> str:
 
 class BrainAgent:
     """
-    Combines rule-based intent detection with an Ollama LLM response.
+    Combines rule-based intent detection with a Groq LLM response.
 
     Args:
-        model:      Ollama model tag, e.g. ``"mistral"``, ``"phi3"``, ``"llama3"``
-        ollama_url: Base URL of the Ollama server (default ``http://localhost:11434``)
+        model:         Groq model id, e.g. ``"llama-3.1-8b-instant"``
+        groq_api_key:  Groq API key. If not passed, reads from ``GROQ_API_KEY`` env var.
+        groq_url:      Groq OpenAI-compatible endpoint.
     """
 
     def __init__(
         self,
-        model: str = "mistral",
-        ollama_url: str = "http://localhost:11434",
+        model: str = "llama-3.1-8b-instant",
+        groq_api_key: str | None = None,
+        groq_url: str = "https://api.groq.com/openai/v1/chat/completions",
     ) -> None:
         self.model = model
-        self.ollama_url = ollama_url.rstrip("/")
-        self._available: bool | None = None   # None ⟹ not probed yet
-        self._probe_lock = threading.Lock()
+        self.groq_api_key = (groq_api_key or os.getenv("GROQ_API_KEY") or "").strip()
+        self.groq_url = groq_url
         # Short-term in-process chat memory
         self.conversation_history: list[dict[str, str]] = []
 
     # ── Availability check ──────────────────────────────────────────────────
 
-    def _probe_ollama(self) -> bool:
-        if self._available is not None:
-            return self._available
-        with self._probe_lock:
-            if self._available is not None:
-                return self._available
-            try:
-                r = requests.get(
-                    f"{self.ollama_url}/api/tags", timeout=4
-                )
-                self._available = r.status_code == 200
-            except Exception:
-                self._available = False
-        return self._available
+    def _has_groq_key(self) -> bool:
+        return bool(self.groq_api_key)
 
     # ── Main entry point ────────────────────────────────────────────────────
 
@@ -544,13 +532,13 @@ class BrainAgent:
         messages.append({"role": "user", "content": processed_text})
 
         # Call LLM
-        response_text = self._call_ollama(messages)
+        response_text = self._call_groq(messages)
         if not response_text:
             if _looks_factual_query(original_text):
                 nick = persona.get("nickname", "beta")
                 response_text = (
-                    f"{nick}, abhi local LLM server reachable nahi hai, "
-                    "isliye sahi factual answer dene ke liye Ollama start karna padega."
+                    f"{nick}, abhi Groq model reachable nahi hai, "
+                    "isliye factual answer dene me dikkat aa rahi hai."
                 )
             else:
                 response_text = self._fallback(original_text, sys_prompt, action)
@@ -805,52 +793,19 @@ class BrainAgent:
 
         return None
 
-    # ── Ollama HTTP call ────────────────────────────────────────────────────
+    # ── Groq HTTP call ──────────────────────────────────────────────────────
 
-    def _call_ollama(self, messages: list) -> str:
-        if not self._probe_ollama():
+    def _call_groq(self, messages: list) -> str:
+        if not self._has_groq_key():
             return ""
         start_time = time.time()
 
-        def _stream_collect(model_name: str) -> str:
-            response_text = ""
-            with requests.post(
-                f"{self.ollama_url}/api/chat",
-                json={
-                    "model": model_name,
-                    "messages": messages,
-                    "stream": True,
-                    "options": {
-                        "temperature": 0.6,
-                        "top_p": 0.9,
-                        "num_predict": 220,
-                    },
-                },
-                timeout=(10, 60),
-                stream=True,
-            ) as resp:
-                resp.raise_for_status()
-                for line in resp.iter_lines(decode_unicode=True):
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    message = chunk.get("message") or {}
-                    content = message.get("content")
-                    if isinstance(content, str):
-                        response_text += content
-            return response_text.strip()
-
         try:
-            # Try preferred model first, then known local fallbacks.
+            # Try preferred model first, then known Groq fallbacks.
             candidates = [
                 self.model,
-                "qwen2.5:7b-instruct",
-                "mistral",
-                "llama3.1:8b",
-                "phi3",
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant",
             ]
             seen = set()
 
@@ -859,7 +814,31 @@ class BrainAgent:
                     continue
                 seen.add(model_name)
                 try:
-                    text = _stream_collect(model_name)
+                    payload = {
+                        "model": model_name,
+                        "messages": messages,
+                        "temperature": 0.6,
+                        "top_p": 0.9,
+                        "max_tokens": 280,
+                    }
+                    resp = requests.post(
+                        self.groq_url,
+                        headers={
+                            "Authorization": f"Bearer {self.groq_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=(10, 60),
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    choices = data.get("choices") or []
+                    text = ""
+                    if choices:
+                        msg = (choices[0] or {}).get("message") or {}
+                        content = msg.get("content")
+                        if isinstance(content, str):
+                            text = content.strip()
                     if text:
                         if model_name != self.model:
                             print(f"[BrainAgent] Fallback model used: {model_name}")
@@ -875,11 +854,8 @@ class BrainAgent:
             print(f"[LLM Time]: {time.time() - start_time:.2f}s")
             return ""
 
-        except requests.exceptions.ConnectionError:
-            self._available = False   # Mark unavailable until next probe
-            return ""
         except Exception as exc:
-            print(f"[BrainAgent] Ollama error: {exc}")
+            print(f"[BrainAgent] Groq error: {exc}")
             return ""
 
     # ── Rule-based fallback (Ollama unavailable) ────────────────────────────
@@ -891,12 +867,16 @@ class BrainAgent:
             "name": "Maa",
             "relationship": "loved one",
             "nickname": "beta",
+            "style": "casual",
+            "language": "hinglish",
         }
 
         for key, pattern in [
             ("name", r"-\s*Name:\s*(.+)"),
             ("relationship", r"-\s*Relationship to user:\s*(.+)"),
             ("nickname", r"always call them:\s*\"([^\"]+)\""),
+            ("style", r"-\s*Personality style:\s*(.+)"),
+            ("language", r"-\s*Preferred neutral language:\s*(.+)"),
         ]:
             m = re.search(pattern, text, flags=re.IGNORECASE)
             if m:
@@ -1013,13 +993,23 @@ class BrainAgent:
         out = (text or "").strip()
         nick = (persona.get("nickname") or "beta").strip()
         rel = (persona.get("relationship") or "").lower()
+        style = (persona.get("style") or "casual").lower()
 
         if not out:
             return f"Haan {nick}, main yahin hoon."
 
         # Keep address personal and consistent.
-        if nick and nick.lower() not in out.lower() and len(out.split()) > 8 and random.random() < 0.35:
-            out = f"{nick}, {out[0].lower() + out[1:] if len(out) > 1 else out.lower()}"
+        nick_prob = 0.30
+        if style in {"casual", "fun"}:
+            nick_prob = 0.45
+        elif style in {"formal", "supportive"}:
+            nick_prob = 0.25
+
+        if nick and nick.lower() not in out.lower() and len(out.split()) > 8 and random.random() < nick_prob:
+            if style == "formal":
+                out = f"{nick}, {out}"
+            else:
+                out = f"{nick}, {out[0].lower() + out[1:] if len(out) > 1 else out.lower()}"
 
         # Relationship-aware soft tone correction when model sounds distant.
         if any(k in out.lower() for k in ["important to", "you should", "consider"]):
@@ -1027,6 +1017,9 @@ class BrainAgent:
                 out = f"{nick}, main tere saath hoon, aaram se bol kya pareshaan kar raha hai."
             elif "father" in rel or "papa" in rel:
                 out = f"{nick}, tension mat le, main hoon na, saath milke solve karte hain."
+
+        if style == "formal" and re.search(r"\btu\b", out.lower()):
+            out = re.sub(r"\btu\b", "aap", out, flags=re.IGNORECASE)
 
         return out
 
