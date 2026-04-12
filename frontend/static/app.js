@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════
-   APNA SAATHI — app.js
+   AIRA — app.js
    All frontend logic: theme, i18n, chat, TTS, STT
 ═══════════════════════════════════════════ */
 
@@ -8,8 +8,8 @@
 // ══════════════════════════════
 const I18N = {
   en: {
-    appName:        "Apna Saathi",
-    welcome_title:  "Apna Saathi",
+    appName:        "Aira",
+    welcome_title:  "Aira",
     welcome_tagline:"Your AI conversation companion",
     welcome_sub:    "Create conversations with personalized AI personas. Talk naturally in your language.",
     welcome_btn:    "Get Started",
@@ -17,10 +17,10 @@ const I18N = {
     intro_scene1_sub: "We're here to listen.",
     intro_scene2_title: "Just speak naturally",
     intro_scene3_left: "You said...",
-    intro_scene3_right: "Apna Saathi responds",
-    intro_scene4_title: "Apna Saathi",
+    intro_scene3_right: "Aira responds",
+    intro_scene4_title: "Aira",
     intro_scene4_sub: "Your AI companion. Always available.",
-    intro_enter: "Enter Apna Saathi",
+    intro_enter: "Enter Aira",
     intro_skip: "Skip",
     step1_badge:    "Step 1 / 2",
     step2_badge:    "Step 2 / 2",
@@ -79,7 +79,7 @@ const I18N = {
     landing_cta:        "Get Started",
     landing_learn:      "Learn More",
     landing_features:   "Features",
-    landing_why:        "Why Apna Saathi?",
+    landing_why:        "Why Aira?",
     landing_why_sub:    "Simple, smart, and speaks your language",
     feat_voice:         "Voice Conversations",
     feat_voice_desc:    "Speak naturally in your preferred language. Our AI understands context and nuance.",
@@ -99,18 +99,18 @@ const I18N = {
     step3_title:        "Start Chatting",
     step3_desc:         "Begin your conversation via voice or text.",
     landing_about:      "About Us",
-    landing_about_title:"About Apna Saathi",
-    landing_about_p1:   "Apna Saathi is an AI-powered conversation platform that lets you create and chat with personalized AI companions. Built using Sarvam AI's language models, it supports natural conversations in multiple Indian languages.",
-    landing_about_p2:   "Whether you want a study buddy, a conversation partner to practice a language, or simply someone to talk to — Apna Saathi is designed to be helpful, friendly, and always available.",
+    landing_about_title:"About Aira",
+    landing_about_p1:   "Aira is an AI-powered conversation platform that lets you create and chat with personalized AI companions. Built using Sarvam AI's language models, it supports natural conversations in multiple Indian languages.",
+    landing_about_p2:   "Whether you want a study buddy, a conversation partner to practice a language, or simply someone to talk to — Aira is designed to be helpful, friendly, and always available.",
     landing_cta2:       "Ready to Start?",
     landing_cta2_sub:   "Create your first AI companion today.",
     landing_begin:      "Begin Now",
     landing_tagline:    "Your AI companion. Always available.",
-    landing_copy:       "© 2026 Apna Saathi. Made with ❤️ in India.",
+    landing_copy:       "© 2026 Aira. Made with ❤️ in India.",
   },
   hi: {
-    appName:        "Apna Saathi",
-    welcome_title:  "Apna Saathi",
+    appName:        "Aira",
+    welcome_title:  "Aira",
     welcome_tagline:"Aapka AI conversation partner",
     welcome_sub:    "Apni pasand ka AI persona banao aur naturally baat karo — apni language mein.",
     welcome_btn:    "Shuru Karein",
@@ -118,10 +118,10 @@ const I18N = {
     intro_scene1_sub: "Hum sun rahe hain.",
     intro_scene2_title: "Bas naturally bolo",
     intro_scene3_left: "Aapne kaha...",
-    intro_scene3_right: "Apna Saathi bolta hai",
-    intro_scene4_title: "Apna Saathi",
+    intro_scene3_right: "Aira bolta hai",
+    intro_scene4_title: "Aira",
     intro_scene4_sub: "Aapka AI companion. Hamesha available.",
-    intro_enter: "Apna Saathi mein aao",
+    intro_enter: "Aira mein aao",
     intro_skip: "Skip",
     step1_badge:    "Step 1 / 2",
     step2_badge:    "Step 2 / 2",
@@ -180,7 +180,7 @@ const I18N = {
     landing_cta:        "Shuru Karo",
     landing_learn:      "Aur Jaano",
     landing_features:   "Features",
-    landing_why:        "Apna Saathi kyun?",
+    landing_why:        "Aira kyun?",
     landing_why_sub:    "Simple, smart, aur aapki language mein baat karta hai",
     feat_voice:         "Voice Conversations",
     feat_voice_desc:    "Apni language mein naturally bolo. AI context aur nuance samajhta hai.",
@@ -200,18 +200,18 @@ const I18N = {
     step3_title:        "Chat Shuru Karo",
     step3_desc:         "Voice ya text se baat karo.",
     landing_about:      "About Us",
-    landing_about_title:"Apna Saathi ke baare mein",
-    landing_about_p1:   "Apna Saathi ek AI-powered conversation platform hai jahan aap personalized AI companions bana sakte ho aur unse chat kar sakte ho. Sarvam AI ke language models se bana hai, multiple Indian languages support karta hai.",
-    landing_about_p2:   "Chahe aapko study buddy chahiye, language practice partner, ya bas kisi se baat karni ho — Apna Saathi helpful, friendly, aur hamesha available hai.",
+    landing_about_title:"Aira ke baare mein",
+    landing_about_p1:   "Aira ek AI-powered conversation platform hai jahan aap personalized AI companions bana sakte ho aur unse chat kar sakte ho. Sarvam AI ke language models se bana hai, multiple Indian languages support karta hai.",
+    landing_about_p2:   "Chahe aapko study buddy chahiye, language practice partner, ya bas kisi se baat karni ho — Aira helpful, friendly, aur hamesha available hai.",
     landing_cta2:       "Ready ho?",
     landing_cta2_sub:   "Aaj apna pehla AI companion banao.",
     landing_begin:      "Shuru Karo",
     landing_tagline:    "Aapka AI companion. Hamesha available.",
-    landing_copy:       "© 2026 Apna Saathi. Made with ❤️ in India.",
+    landing_copy:       "© 2026 Aira. Made with ❤️ in India.",
   },
   hinglish: {
-    appName:        "Apna Saathi",
-    welcome_title:  "Apna Saathi",
+    appName:        "Aira",
+    welcome_title:  "Aira",
     welcome_tagline:"Your personal AI chat buddy",
     welcome_sub:    "Create your own AI companion and have chill conversations — in your style!",
     welcome_btn:    "Let's Go!",
@@ -219,8 +219,8 @@ const I18N = {
     intro_scene1_sub: "We're listening, yaar.",
     intro_scene2_title: "Bas bol do jo mann mein hai",
     intro_scene3_left: "You said...",
-    intro_scene3_right: "Apna Saathi says",
-    intro_scene4_title: "Apna Saathi",
+    intro_scene3_right: "Aira says",
+    intro_scene4_title: "Aira",
     intro_scene4_sub: "Your AI buddy. Always here for you.",
     intro_enter: "Let's enter!",
     intro_skip: "Skip",
@@ -281,7 +281,7 @@ const I18N = {
     landing_cta:        "Let's Go!",
     landing_learn:      "Know More",
     landing_features:   "Features",
-    landing_why:        "Why Apna Saathi?",
+    landing_why:        "Why Aira?",
     landing_why_sub:    "Simple, smart, and speaks your language",
     feat_voice:         "Voice Chat",
     feat_voice_desc:    "Talk naturally in your preferred language. AI gets the context.",
@@ -301,14 +301,14 @@ const I18N = {
     step3_title:        "Start Chatting",
     step3_desc:         "Voice or text — your choice!",
     landing_about:      "About",
-    landing_about_title:"About Apna Saathi",
-    landing_about_p1:   "Apna Saathi is an AI chat platform where you can create personalized AI companions and have real conversations. Built with Sarvam AI — supports Hindi, English, and many more Indian languages.",
-    landing_about_p2:   "Need a study partner, someone to practice language with, or just want to chat? Apna Saathi is helpful, friendly, and always there.",
+    landing_about_title:"About Aira",
+    landing_about_p1:   "Aira is an AI chat platform where you can create personalized AI companions and have real conversations. Built with Sarvam AI — supports Hindi, English, and many more Indian languages.",
+    landing_about_p2:   "Need a study partner, someone to practice language with, or just want to chat? Aira is helpful, friendly, and always there.",
     landing_cta2:       "Ready to try?",
     landing_cta2_sub:   "Create your first AI buddy now.",
     landing_begin:      "Start Now",
     landing_tagline:    "Your AI buddy. Always here.",
-    landing_copy:       "© 2026 Apna Saathi. Made with ❤️ in India.",
+    landing_copy:       "© 2026 Aira. Made with ❤️ in India.",
   },
 };
 
@@ -380,11 +380,11 @@ const LANG_SHORT = {
 function toggleTheme() {
   theme = theme === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('saathi_theme', theme);
+  localStorage.setItem('aira_theme', theme);
 }
 
 function initTheme() {
-  const saved = localStorage.getItem('saathi_theme') || 'dark';
+  const saved = localStorage.getItem('aira_theme') || 'dark';
   theme = saved;
   document.documentElement.setAttribute('data-theme', theme);
 }
@@ -404,7 +404,7 @@ function setLanguage(lang) {
     uiLang = lang;
     updateLangSelector();
     applyI18n();
-    localStorage.setItem('saathi_ui_lang', uiLang);
+    localStorage.setItem('aira_ui_lang', uiLang);
   }
 }
 
@@ -423,7 +423,7 @@ function updateLangSelector() {
 }
 
 function initUiLang() {
-  const saved = localStorage.getItem('saathi_ui_lang') || 'en';
+  const saved = localStorage.getItem('aira_ui_lang') || 'en';
   uiLang = LANGUAGES.includes(saved) ? saved : 'en';
   updateLangSelector();
   applyI18n();
@@ -824,7 +824,7 @@ function bindSidebarActions() {
     hideBtn.dataset.bound = '1';
     hideBtn.addEventListener('click', () => {
       sidebarCollapsed = true;
-      localStorage.setItem('saathi_sidebar_collapsed', '1');
+      localStorage.setItem('aira_sidebar_collapsed', '1');
       applySidebarState();
     });
   }
@@ -833,7 +833,7 @@ function bindSidebarActions() {
     toggleBtn.dataset.bound = '1';
     toggleBtn.addEventListener('click', () => {
       sidebarCollapsed = !sidebarCollapsed;
-      localStorage.setItem('saathi_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
+      localStorage.setItem('aira_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
       applySidebarState();
     });
   }
@@ -1200,8 +1200,8 @@ async function getBotReply() {
       return;
     }
 
-    const groqApiKey = (localStorage.getItem('saathi_groq_api_key') || '').trim();
-    const groqModel = (localStorage.getItem('saathi_groq_model') || '').trim();
+    const groqApiKey = (localStorage.getItem('aira_groq_api_key') || '').trim();
+    const groqModel = (localStorage.getItem('aira_groq_model') || '').trim();
 
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -1243,7 +1243,7 @@ async function ensureAuthenticated(redirectOnFail = true) {
     const res = await fetch('/api/me');
     if (!res.ok) {
       if (redirectOnFail) {
-        localStorage.setItem('saathi_post_login_action', 'get-started');
+        localStorage.setItem('aira_post_login_action', 'get-started');
         window.location.href = '/login';
       }
       currentUser = null;
@@ -1252,7 +1252,7 @@ async function ensureAuthenticated(redirectOnFail = true) {
     const data = await res.json().catch(() => ({}));
     if (!data.ok || !data.authenticated) {
       if (redirectOnFail) {
-        localStorage.setItem('saathi_post_login_action', 'get-started');
+        localStorage.setItem('aira_post_login_action', 'get-started');
         window.location.href = '/login';
       }
       currentUser = null;
@@ -1262,7 +1262,7 @@ async function ensureAuthenticated(redirectOnFail = true) {
     return true;
   } catch (_) {
     if (redirectOnFail) {
-      localStorage.setItem('saathi_post_login_action', 'get-started');
+      localStorage.setItem('aira_post_login_action', 'get-started');
       window.location.href = '/login';
     }
     currentUser = null;
@@ -1811,13 +1811,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   initUiLang();
   bindAudioUnlockHandlers();
-  sidebarCollapsed = localStorage.getItem('saathi_sidebar_collapsed') === '1';
+  sidebarCollapsed = localStorage.getItem('aira_sidebar_collapsed') === '1';
   applySidebarState();
 
   const autostart = new URLSearchParams(window.location.search).get('autostart') === '1';
-  const pendingAction = localStorage.getItem('saathi_post_login_action');
+  const pendingAction = localStorage.getItem('aira_post_login_action');
   if (isAuthed && (autostart || pendingAction === 'get-started')) {
-    localStorage.removeItem('saathi_post_login_action');
+    localStorage.removeItem('aira_post_login_action');
     clearIntroTimers();
     showScreen('landingScreen');
     initLandingAnimations();

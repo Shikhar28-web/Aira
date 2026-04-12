@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Companion Settings - Apna Saathi</title>
+  <title>Companion Settings - Aira</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,700;1,400&family=Nunito:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
@@ -91,8 +91,8 @@
         if (styleEl) styleEl.checked = true;
         if (langEl) langEl.checked = true;
 
-        document.getElementById('groqApiKey').value = localStorage.getItem('saathi_groq_api_key') || '';
-        document.getElementById('groqModel').value = localStorage.getItem('saathi_groq_model') || 'llama-3.1-8b-instant';
+        document.getElementById('groqApiKey').value = localStorage.getItem('aira_groq_api_key') || '';
+        document.getElementById('groqModel').value = localStorage.getItem('aira_groq_model') || 'llama-3.1-8b-instant';
       } catch (e) {
         setMsg('Unable to load settings', '');
       }
@@ -122,8 +122,8 @@
           return;
         }
 
-        localStorage.setItem('saathi_groq_api_key', groqApiKey);
-        localStorage.setItem('saathi_groq_model', groqModel || 'llama-3.1-8b-instant');
+        localStorage.setItem('aira_groq_api_key', groqApiKey);
+        localStorage.setItem('aira_groq_model', groqModel || 'llama-3.1-8b-instant');
         setMsg('', 'Settings saved successfully');
       } catch (e) {
         setMsg('Server error while saving settings', '');

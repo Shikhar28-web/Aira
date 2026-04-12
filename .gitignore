@@ -1,0 +1,30 @@
+# Python cache and artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+.venv310/
+env/
+
+# Secrets and local env files
+.env
+.env.*
+!.env.example
+
+# IDE/editor files
+.vscode/
+.DS_Store
+
+# Node / Remotion artifacts
+node_modules/
+out/
+dist/
+*.log
+
+# Runtime-generated backend audio artifacts
+backend/assets/profile_voices/
+backend/assets/*.wav
+backend/assets/*.mp3
