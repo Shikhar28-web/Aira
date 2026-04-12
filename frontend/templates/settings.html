@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Companion Settings - Apna Saathi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,700;1,400&family=Nunito:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="auth-page">
+    <div class="auth-card settings-card">
+      <h1>Companion Settings</h1>
+      <p>Customize your companion profile</p>
+
+      <label for="companionName">Companion Name</label>
+      <input id="companionName" type="text" placeholder="Enter companion name" />
+
+      <div class="settings-group">
+        <label>Style</label>
+        <div class="radio-row">
+          <label><input type="radio" name="style" value="casual" checked /> Casual</label>
+          <label><input type="radio" name="style" value="supportive" /> Supportive</label>
+          <label><input type="radio" name="style" value="motivational" /> Motivational</label>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <label>Language</label>
+        <div class="radio-row">
+          <label><input type="radio" name="language" value="hinglish" checked /> Hinglish</label>
+          <label><input type="radio" name="language" value="hindi" /> Hindi</label>
+          <label><input type="radio" name="language" value="english" /> English</label>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <label for="groqApiKey">Groq API Key (per browser)</label>
+        <input id="groqApiKey" type="password" placeholder="gsk_..." autocomplete="off" />
+      </div>
+
+      <div class="settings-group">
+        <label for="groqModel">Groq Model</label>
+        <input id="groqModel" type="text" placeholder="llama-3.1-8b-instant" />
+      </div>
+
+      <p class="error-msg" id="settingsError" style="display:none"></p>
+      <p class="success-msg" id="settingsSuccess" style="display:none"></p>
+
+      <div class="auth-actions">
+        <button class="btn-primary" id="saveSettingsBtn">Save</button>
+        <button class="btn-ghost" id="backBtn">Back to Chat</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function setMsg(error, success) {
+      const errEl = document.getElementById('settingsError');
+      const okEl = document.getElementById('settingsSuccess');
+      errEl.style.display = error ? 'block' : 'none';
+      okEl.style.display = success ? 'block' : 'none';
+      errEl.textContent = error || '';
+      okEl.textContent = success || '';
+    }
+
+    function checkedValue(name) {
+      const el = document.querySelector(`input[name="${name}"]:checked`);
+      return el ? el.value : '';
+    }
+
+    async function loadSettings() {
+      try {
+        const meRes = await fetch('/api/me');
+        if (!meRes.ok) {
+          window.location.href = '/login';
+          return;
+        }
+
+        const res = await fetch('/api/companion');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok || !data.companion) return;
+
+        const c = data.companion;
+        document.getElementById('companionName').value = c.name || '';
+        const style = c.style || 'casual';
+        const language = c.language || 'hinglish';
+        const styleEl = document.querySelector(`input[name="style"][value="${style}"]`);
+        const langEl = document.querySelector(`input[name="language"][value="${language}"]`);
+        if (styleEl) styleEl.checked = true;
+        if (langEl) langEl.checked = true;
+
+        document.getElementById('groqApiKey').value = localStorage.getItem('saathi_groq_api_key') || '';
+        document.getElementById('groqModel').value = localStorage.getItem('saathi_groq_model') || 'llama-3.1-8b-instant';
+      } catch (e) {
+        setMsg('Unable to load settings', '');
+      }
+    }
+
+    async function saveSettings() {
+      const name = document.getElementById('companionName').value.trim();
+      const style = checkedValue('style');
+      const language = checkedValue('language');
+      const groqApiKey = document.getElementById('groqApiKey').value.trim();
+      const groqModel = document.getElementById('groqModel').value.trim();
+
+      if (!name) {
+        setMsg('Companion name is required', '');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/companion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, style, language }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          setMsg(data.error || 'Failed to save settings', '');
+          return;
+        }
+
+        localStorage.setItem('saathi_groq_api_key', groqApiKey);
+        localStorage.setItem('saathi_groq_model', groqModel || 'llama-3.1-8b-instant');
+        setMsg('', 'Settings saved successfully');
+      } catch (e) {
+        setMsg('Server error while saving settings', '');
+      }
+    }
+
+    document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+    document.getElementById('backBtn').addEventListener('click', () => {
+      window.location.href = '/';
+    });
+
+    loadSettings();
+  </script>
+</body>
+</html>

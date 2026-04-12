@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="hi" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Apna Saathi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,700;1,400&family=Nunito:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- Top bar (visible on all screens) -->
+  <header class="topbar" id="topbar">
+    <div class="topbar-brand">
+      <img src="/static/logo.png" alt="" class="brand-logo" />
+      <span class="brand-name" data-i18n="appName">Apna Saathi</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="pill-btn" id="logoutNavBtn" title="Logout">Logout</button>
+      <!-- UI Language switcher -->
+      <div class="lang-dropdown">
+        <button class="pill-btn lang-btn" onclick="toggleLangDropdown()" title="Change Language">
+          <span id="langUiLabel">EN</span>
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="lang-options" id="langOptions">
+          <button onclick="setLanguage('en')">English</button>
+          <button onclick="setLanguage('hi')">Hindi</button>
+          <button onclick="setLanguage('hinglish')">Hinglish</button>
+        </div>
+      </div>
+      <!-- Dark/Light toggle -->
+      <button class="icon-toggle" id="themeBtn" onclick="toggleTheme()" title="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/>
+          <line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/>
+          <line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════
+       SCREEN 0: INTRO LANDING (Remotion-inspired)
+  ═══════════════════════════════ -->
+  <section class="screen active intro-screen" id="introScreen">
+    <div class="intro-stage" id="introStage">
+      <!-- Floating particles background -->
+      <div class="intro-particles">
+        <div class="orb"></div>
+        <div class="orb"></div>
+        <div class="orb"></div>
+        <div class="orb"></div>
+        <div class="orb"></div>
+        <div class="orb"></div>
+      </div>
+      <span class="intro-skip-hint">Click anywhere to skip</span>
+
+      <div class="intro-scene active" id="introScene1">
+        <div class="intro-wave">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <h1 data-i18n="intro_scene1_title">Feeling overwhelmed?</h1>
+        <p data-i18n="intro_scene1_sub">Bolo... hum sun rahe hain.</p>
+      </div>
+
+      <div class="intro-scene" id="introScene2">
+        <div class="intro-mic-pulse">
+          <div class="ring r1"></div>
+          <div class="ring r2"></div>
+          <div class="ring r3"></div>
+          <div class="core">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+            </svg>
+          </div>
+        </div>
+        <h1 data-i18n="intro_scene2_title">Just speak your heart</h1>
+      </div>
+
+      <div class="intro-scene" id="introScene3">
+        <div class="intro-convo-grid">
+          <div class="intro-convo-card">
+            <small data-i18n="intro_scene3_left">You said...</small>
+            <p>I've been feeling really stressed lately...</p>
+          </div>
+          <div class="intro-convo-card bot">
+            <small data-i18n="intro_scene3_right">Apna Saathi responds</small>
+            <p>I hear you. Take a deep breath with me.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="intro-scene" id="introScene4">
+        <div class="intro-logo">
+          <img src="/static/logo.png" alt="Apna Saathi" class="intro-logo-img" />
+        </div>
+        <h1 data-i18n="intro_scene4_title">Apna Saathi</h1>
+        <p data-i18n="intro_scene4_sub">Your voice. Your companion. Your peace.</p>
+      </div>
+
+      <button class="btn-primary intro-enter-btn" id="introEnterBtn" onclick="enterFromIntro()" data-i18n="intro_enter">
+        Enter Apna Saathi
+      </button>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════
+       SCREEN 0.5: LANDING PAGE
+  ═══════════════════════════════ -->
+  <section class="screen landing-screen" id="landingScreen">
+    
+    <!-- Hero with Scroll Animation -->
+    <div class="landing-hero" id="landingHero">
+      <div class="hero-content">
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          <span data-i18n="landing_badge">AI-Powered Companion</span>
+        </div>
+        <h1 class="hero-title" data-i18n="landing_hero_title">
+          Your Personal AI<br/>
+          <span class="gradient-text">Conversation Partner</span>
+        </h1>
+        <p class="hero-subtitle" data-i18n="landing_hero_sub">
+          Create custom AI personas and have natural conversations in Hindi, English, or 10+ Indian languages.
+        </p>
+        <div class="hero-buttons">
+          <button class="btn-primary hero-cta" onclick="handleGetStarted()">
+            <span data-i18n="landing_cta">Get Started</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </button>
+          <a href="#features" class="btn-ghost hero-learn" data-i18n="landing_learn">Learn More</a>
+        </div>
+      </div>
+      
+      <!-- 3D Card with scroll effect -->
+      <div class="hero-card-container" id="heroCard">
+        <div class="hero-card">
+          <div class="hero-card-inner">
+            <img src="/static/logo.png" alt="Apna Saathi" class="hero-card-logo" />
+            <div class="hero-card-preview">
+              <div class="preview-header">
+                <div class="preview-avatar">A</div>
+                <div class="preview-name">AI Buddy</div>
+                <span class="preview-status" data-i18n="online">Online</span>
+              </div>
+              <div class="preview-messages">
+                <div class="preview-msg user">Hey, how's it going?</div>
+                <div class="preview-msg bot">I'm doing great! What's on your mind today? 😊</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Features Section -->
+    <div class="landing-section" id="features">
+      <div class="section-header">
+        <span class="section-badge" data-i18n="landing_features">Features</span>
+        <h2 class="section-title" data-i18n="landing_why">Why Choose Apna Saathi?</h2>
+        <p class="section-subtitle" data-i18n="landing_why_sub">AI companion that speaks your language</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+              <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
+            </svg>
+          </div>
+          <h3 data-i18n="feat_voice">Voice Conversations</h3>
+          <p data-i18n="feat_voice_desc">Speak naturally in Hindi, English, or 10+ Indian languages. Our AI understands what you say.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/>
+            </svg>
+          </div>
+          <h3 data-i18n="feat_persona">Custom AI Personas</h3>
+          <p data-i18n="feat_persona_desc">Create AI personas with custom personalities, speaking styles, and conversation topics.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
+            </svg>
+          </div>
+          <h3 data-i18n="feat_support">Friendly Support</h3>
+          <p data-i18n="feat_support_desc">Get a listening ear whenever you need it. Our AI is here to chat, help, and keep you company.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+          </div>
+          <h3 data-i18n="feat_privacy">Private & Secure</h3>
+          <p data-i18n="feat_privacy_desc">Your conversations stay private. We prioritize your security and data protection.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- How It Works -->
+    <div class="landing-section how-it-works">
+      <div class="section-header">
+        <span class="section-badge" data-i18n="landing_steps">Simple Steps</span>
+        <h2 class="section-title" data-i18n="landing_how">How It Works</h2>
+        <p class="section-subtitle" data-i18n="landing_how_sub">Get started in minutes</p>
+      </div>
+      <div class="steps-container">
+        <div class="step-card">
+          <div class="step-number">1</div>
+          <h3 data-i18n="step1_title">Create a Persona</h3>
+          <p data-i18n="step1_desc">Set up an AI persona — give it a name, choose a relationship type, and a nickname for you.</p>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step-card">
+          <div class="step-number">2</div>
+          <h3 data-i18n="step2_title">Add Personality</h3>
+          <p data-i18n="step2_desc">Add personality traits, favorite phrases, and background info to make it unique.</p>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step-card">
+          <div class="step-number">3</div>
+          <h3 data-i18n="step3_title">Start Talking</h3>
+          <p data-i18n="step3_desc">Begin chatting! Speak or type in your preferred language — the AI will respond naturally.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- About Section -->
+    <div class="landing-section about-section">
+      <div class="about-content">
+        <div class="about-text">
+          <span class="section-badge" data-i18n="landing_about">About Us</span>
+          <h2 class="section-title" data-i18n="landing_about_title">Built for You</h2>
+          <p data-i18n="landing_about_p1">Apna Saathi is an AI-powered conversation platform that lets you create personalized chat companions. Using advanced language models, we've built an experience that feels natural and meaningful.</p>
+          <p data-i18n="landing_about_p2">Whether you want someone to practice conversations with, a friendly AI to chat with, or a custom persona for roleplay scenarios — Apna Saathi is here. Powered by Sarvam AI's multilingual technology.</p>
+          <div class="about-stats">
+            <div class="stat">
+              <span class="stat-number">10+</span>
+              <span class="stat-label">Languages</span>
+            </div>
+            <div class="stat">
+              <span class="stat-number">24/7</span>
+              <span class="stat-label">Available</span>
+            </div>
+            <div class="stat">
+              <span class="stat-number">100%</span>
+              <span class="stat-label">Private</span>
+            </div>
+          </div>
+        </div>
+        <div class="about-image">
+          <img src="/static/logo.png" alt="Apna Saathi" class="about-logo" />
+        </div>
+      </div>
+    </div>
+
+    <!-- CTA Section -->
+    <div class="landing-section cta-section">
+      <div class="cta-content">
+        <h2 data-i18n="landing_cta2">Ready to Get Started?</h2>
+        <p data-i18n="landing_cta2_sub">Create your first AI persona and start chatting today.</p>
+        <button class="btn-primary cta-btn" onclick="handleGetStarted()">
+          <span data-i18n="landing_begin">Begin Now</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="landing-footer">
+      <div class="footer-content">
+        <div class="footer-brand">
+          <img src="/static/logo.png" alt="" class="footer-logo" />
+          <span>Apna Saathi</span>
+        </div>
+        <p class="footer-tagline" data-i18n="landing_tagline">Your AI. Your language. Your style.</p>
+        <p class="footer-copy">&copy; 2026 Apna Saathi. Made with ❤️ in India.</p>
+      </div>
+    </footer>
+  </section>
+
+  <!-- ═══════════════════════════════
+       SCREEN 1: SETUP - PROFILE
+  ═══════════════════════════════ -->
+  <section class="screen" id="setupScreen">
+    <div class="form-card">
+      <div class="step-badge"><span data-i18n="step1_badge">Step 1 / 2</span></div>
+      <div class="prog-bar"><div class="prog-fill" style="width:50%"></div></div>
+      <h2 class="card-title" data-i18n="setup_title">Unke baare mein batao</h2>
+      <p class="card-sub" data-i18n="setup_sub">Hum unki ek khaas jagah banaenge — sirf tumhare liye.</p>
+
+      <div class="field-group">
+        <label data-i18n="lbl_name">Unka naam kya hai?</label>
+        <input type="text" id="lovedName" data-i18n-ph="ph_name" placeholder="Maa, Baba, Priya, Rajan…" />
+      </div>
+
+      <div class="field-group">
+        <label data-i18n="lbl_rel">Rishta kya hai?</label>
+        <select id="relationship">
+          <option value="" data-i18n="rel_choose">-- Chuniye --</option>
+          <option value="mother" data-i18n="rel_mother">Maa (Mother)</option>
+          <option value="father" data-i18n="rel_father">Baba / Papa (Father)</option>
+          <option value="partner" data-i18n="rel_partner">Partner / Spouse</option>
+          <option value="best friend" data-i18n="rel_bestfriend">Best Friend</option>
+          <option value="sibling" data-i18n="rel_sibling">Bhai / Behen (Sibling)</option>
+          <option value="grandparent" data-i18n="rel_grand">Dada / Dadi / Nana / Nani</option>
+          <option value="child" data-i18n="rel_child">Bachcha (Child)</option>
+          <option value="friend" data-i18n="rel_friend">Dost (Friend)</option>
+        </select>
+      </div>
+
+      <div class="field-row">
+        <div class="field-group">
+          <label data-i18n="lbl_lang">Boli (Language)</label>
+          <select id="language">
+            <option value="hi-IN">Hindi</option>
+            <option value="bn-IN">Bangla</option>
+            <option value="ta-IN">Tamil</option>
+            <option value="te-IN">Telugu</option>
+            <option value="kn-IN">Kannada</option>
+            <option value="ml-IN">Malayalam</option>
+            <option value="mr-IN">Marathi</option>
+            <option value="gu-IN">Gujarati</option>
+            <option value="pa-IN">Punjabi</option>
+            <option value="en-IN">English</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label data-i18n="lbl_voice">Awaaz (Voice)</label>
+          <select id="voiceType">
+            <option value="female" data-i18n="voice_f">Nari (Female)</option>
+            <option value="male" data-i18n="voice_m">Purush (Male)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-ghost" onclick="showScreen('landingScreen')" data-i18n="btn_back">← Wapas</button>
+        <button class="btn-primary" onclick="goToTraining()">
+          <span data-i18n="btn_next">Aage</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════
+       SCREEN 2: SETUP - TRAINING
+  ═══════════════════════════════ -->
+  <section class="screen" id="trainingScreen">
+    <div class="form-card">
+      <div class="step-badge"><span data-i18n="step2_badge">Step 2 / 2</span></div>
+      <div class="prog-bar"><div class="prog-fill" style="width:100%"></div></div>
+      <h2 class="card-title" data-i18n="train_title">Unka andaaz sikhao</h2>
+      <p class="card-sub" data-i18n="train_sub">Jitna batao, utna behtar AI unhe samjhega.</p>
+
+      <div class="field-group">
+        <label data-i18n="lbl_nickname">Woh tumhe kya kehte hain? (Pet name)</label>
+        <input type="text" id="q_nickname" data-i18n-ph="ph_nickname" placeholder="Beta, Jaan, Chutki, Raja…" />
+      </div>
+
+      <div class="field-group">
+        <label data-i18n="lbl_personality">Unka mizaj kaisa hai? (Personality)</label>
+        <div class="personality-grid" id="personalityGrid">
+          <div class="pers-chip selected" data-val="warm and caring" onclick="selectPersonality(this)">🤗 Pyaara</div>
+          <div class="pers-chip" data-val="funny and playful" onclick="selectPersonality(this)">😄 Mazaakia</div>
+          <div class="pers-chip" data-val="calm and wise" onclick="selectPersonality(this)">🧘 Samajhdaar</div>
+          <div class="pers-chip" data-val="strict but loving" onclick="selectPersonality(this)">💪 Strict</div>
+          <div class="pers-chip" data-val="emotional and expressive" onclick="selectPersonality(this)">🥺 Bhavuk</div>
+          <div class="pers-chip" data-val="simple and direct" onclick="selectPersonality(this)">💬 Seedha</div>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label data-i18n="lbl_phrases">Unki khas phrases / aadatein</label>
+        <textarea id="q_phrases" data-i18n-ph="ph_phrases" placeholder="e.g. 'Khana khaya?', 'Arre yaar', 'Bhagwan ka shukar kar'…" rows="3"></textarea>
+      </div>
+
+      <div class="field-group">
+        <label data-i18n="lbl_wisdom">Ek cheez jo woh hamesha kehte the</label>
+        <input type="text" id="q_wisdom" data-i18n-ph="ph_wisdom" placeholder="'Mehnat karo, zindagi seedhi ho jaayegi'" />
+      </div>
+
+      <!-- Audio upload -->
+      <div class="audio-drop" id="audioDrop" onclick="document.getElementById('audioFile').click()">
+        <div class="audio-drop-icon">🎙️</div>
+        <p class="audio-drop-title" data-i18n="audio_title">Unki awaaz upload karein (Optional)</p>
+        <p class="audio-drop-sub" data-i18n="audio_sub">Recording se AI unka andaaz aur behtar seekhega</p>
+        <input type="file" id="audioFile" accept="audio/*" onchange="handleAudioUpload(event)" style="display:none" />
+        <div id="audioFileTag" class="audio-file-tag" style="display:none">
+          <span>🎵</span><span id="audioFileName"></span>
+          <span class="remove-audio" onclick="removeAudio(event)">✕</span>
+        </div>
+      </div>
+      <div id="transcribeStatus" class="transcribe-status" style="display:none"></div>
+
+      <div class="btn-row">
+        <button class="btn-ghost" onclick="showScreen('setupScreen')" data-i18n="btn_back">← Wapas</button>
+        <button class="btn-primary" id="startChatBtn" onclick="startChat()">
+          <span data-i18n="btn_start">Milao Unse ✦</span>
+        </button>
+      </div>
+      <p id="trainError" class="error-msg" style="display:none"></p>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════════
+       SCREEN 3: CHAT
+  ═══════════════════════════════ -->
+  <section class="screen" id="chatScreen">
+
+    <div class="app-container" id="chatAppContainer">
+      <aside class="sidebar" id="chatSidebar">
+        <div class="sidebar-header">
+          <button class="btn-primary sidebar-new-chat" id="newChatBtn">New Chat</button>
+          <button class="btn-ghost sidebar-hide-btn" id="sidebarHideBtn" type="button">Hide Sidebar</button>
+        </div>
+        <div class="history-list" id="historyList">
+          <!-- history items injected dynamically -->
+        </div>
+      </aside>
+
+      <div class="chat-area">
+        <div class="chat-header">
+          <button class="icon-toggle small sidebar-toggle-btn" id="sidebarToggleBtn" type="button" title="Show sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <line x1="3" y1="12" x2="21" y2="12"/>
+              <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
+          <div class="chat-avatar" id="chatAvatar">?</div>
+          <div class="chat-identity">
+            <h3 id="chatName">—</h3>
+            <p id="chatRelation" class="chat-status">
+              <span class="status-dot"></span>
+              <span data-i18n="online">Available</span>
+            </p>
+          </div>
+          <div class="chat-header-right">
+            <span class="clone-badge" id="cloneStatusBadge" style="display:none">Voice clone off</span>
+            <span class="lang-badge" id="chatLangBadge">HI</span>
+            <button class="icon-toggle small" onclick="resetProfile()" title="New Profile">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="messages-area" id="messagesArea">
+          <!-- messages injected dynamically -->
+        </div>
+
+        <div class="input-bar">
+          <button class="mic-btn" id="micBtn" onclick="toggleRecord()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+              <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
+            </svg>
+          </button>
+          <div class="input-wrap">
+            <input type="text" id="chatInput" data-i18n-ph="ph_chat" placeholder="Unhe kuch kaho…"
+                   onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendMessage(); }" />
+          </div>
+          <button class="send-btn" onclick="sendMessage()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <div class="modal-backdrop" id="companionModalBackdrop" style="display:none">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="companionModalTitle">
+      <h3 id="companionModalTitle">Edit Companion</h3>
+
+      <label for="companionEditName">Name</label>
+      <input id="companionEditName" type="text" placeholder="Companion name" />
+
+      <label for="companionEditStyle">Style</label>
+      <select id="companionEditStyle">
+        <option value="casual">Casual</option>
+        <option value="formal">Formal</option>
+        <option value="supportive">Supportive</option>
+        <option value="motivational">Motivational</option>
+        <option value="fun">Fun</option>
+      </select>
+
+      <label for="companionEditLanguage">Language</label>
+      <select id="companionEditLanguage">
+        <option value="hinglish">Hinglish</option>
+        <option value="hindi">Hindi</option>
+        <option value="english">English</option>
+      </select>
+
+      <label for="companionEditVoiceType">Voice</label>
+      <select id="companionEditVoiceType">
+        <option value="female">Female</option>
+        <option value="male">Male</option>
+      </select>
+
+      <label for="companionEditAudio">Voice Sample (optional)</label>
+      <input id="companionEditAudio" type="file" accept="audio/*" />
+
+      <p class="error-msg" id="companionModalError" style="display:none"></p>
+
+      <div class="modal-actions">
+        <button class="btn-ghost" id="cancelCompanionEditBtn" type="button">Cancel</button>
+        <button class="btn-primary" id="saveCompanionEditBtn" type="button">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login - Apna Saathi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,700;1,400&family=Nunito:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <main class="auth-page">
+    <div class="auth-card">
+      <h1>Welcome Back</h1>
+      <p>Login to continue your conversations</p>
+
+      <label for="username">Username</label>
+      <input id="username" type="text" placeholder="Enter username" />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" placeholder="Enter password" />
+
+      <p class="error-msg" id="authError" style="display:none"></p>
+
+      <div class="auth-actions">
+        <button class="btn-primary" id="authSubmitBtn">Login</button>
+        <button class="btn-ghost" id="authToggleBtn">Switch to Register</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let mode = 'login';
+
+    function setError(msg) {
+      const el = document.getElementById('authError');
+      if (!msg) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+      }
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function syncMode() {
+      document.getElementById('authSubmitBtn').textContent = mode === 'login' ? 'Login' : 'Register';
+      document.getElementById('authToggleBtn').textContent = mode === 'login' ? 'Switch to Register' : 'Switch to Login';
+      setError('');
+    }
+
+    async function submitAuth() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      if (!username || !password) {
+        setError('Username and password are required');
+        return;
+      }
+
+      const endpoint = mode === 'login' ? '/api/login' : '/api/register';
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) {
+          setError(data.error || 'Authentication failed');
+          return;
+        }
+        const pending = localStorage.getItem('saathi_post_login_action');
+        if (pending === 'get-started') {
+          localStorage.removeItem('saathi_post_login_action');
+          window.location.href = '/?autostart=1';
+        } else {
+          window.location.href = '/';
+        }
+      } catch (e) {
+        setError('Server error. Try again.');
+      }
+    }
+
+    document.getElementById('authSubmitBtn').addEventListener('click', submitAuth);
+    document.getElementById('authToggleBtn').addEventListener('click', () => {
+      mode = mode === 'login' ? 'register' : 'login';
+      syncMode();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitAuth();
+    });
+
+    syncMode();
+  </script>
+</body>
+</html>
