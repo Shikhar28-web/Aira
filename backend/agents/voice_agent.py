@@ -238,13 +238,18 @@ class VoiceAgent:
         if not text:
             return None, False
 
+        clone_requested = bool(speaker_wav and os.path.exists(speaker_wav))
+
         # STEP 1: Normalize text for TTS (emotion-based prosody)
-        pause_text, speed = self._prepare_tts_text(text, emotion, language_code=language_code)
+        pause_text, speed = self._prepare_tts_text(
+            text,
+            emotion,
+            language_code=language_code,
+            preserve_timbre=clone_requested,
+        )
         print(f"[TTS] Emotion={emotion}, Language={language_code}, Speed={speed:.2f}")
         print(f"[TTS] Text={pause_text[:60]}..." if len(pause_text) > 60 else f"[TTS] Text={pause_text}")
         gender_hint = _normalize_gender_hint(speaker)
-
-        clone_requested = bool(speaker_wav and os.path.exists(speaker_wav))
 
         # For explicit male/female selection without clone sample, prefer
         # native system voices first for clearer gender separation.
@@ -298,7 +303,12 @@ class VoiceAgent:
         return self._windows_system_speech_synthesize(pause_text), False
 
     @staticmethod
-    def _prepare_tts_text(text: str, emotion: str, language_code: str = "hi-IN") -> tuple[str, float]:
+    def _prepare_tts_text(
+        text: str,
+        emotion: str,
+        language_code: str = "hi-IN",
+        preserve_timbre: bool = False,
+    ) -> tuple[str, float]:
         """
         PROSODY MODULATION FOR TTS ONLY
         ===============================
@@ -327,6 +337,12 @@ class VoiceAgent:
         speed = 1.0
         pause_text = (text or "").strip()
         is_hindi = (language_code or "").startswith("hi")
+
+        # For clone requests, keep timing/text untouched as much as possible
+        # to preserve the reference speaker identity.
+        if preserve_timbre:
+            pause_text = " ".join(pause_text.split())
+            return pause_text, 1.0
 
         # Keep Hindi modulation subtle; strong shifts make cloned output unnatural.
         if emotion == "sadness":
