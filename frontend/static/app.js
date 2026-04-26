@@ -331,6 +331,7 @@ let audioChunks = [];
 let toastTimer = null;
 let introTimers = [];
 let pendingAudioBase64 = null;
+let pendingAudioMime = null;
 let pendingAudioButton = null;
 let audioUnlockHandlersBound = false;
 let audioPlaybackUnlocked = false;
@@ -1389,6 +1390,7 @@ async function speakText(text, btnEl) {
       showToast(t('toast_tts_fail')); 
       return; 
     }
+    const audioMime = data.audio_mime || 'audio/wav';
 
     if (data.voice_cloned) {
       updateCloneBadge('on');
@@ -1408,7 +1410,7 @@ async function speakText(text, btnEl) {
 
     // Decode audio data
     const audioBytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
-    const blob = new Blob([audioBytes], { type: 'audio/wav' });
+    const blob = new Blob([audioBytes], { type: audioMime });
     const url = URL.createObjectURL(blob);
     
     // Create and play audio
@@ -1432,6 +1434,7 @@ async function speakText(text, btnEl) {
     } catch (playErr) {
       // Playback blocked - store base64 for retry on next gesture
       pendingAudioBase64 = data.audio;
+      pendingAudioMime = audioMime;
       pendingAudioButton = btnEl;
       currentAudio = null;
       if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
@@ -1639,10 +1642,12 @@ function bindAudioUnlockHandlers() {
     }
     
     const base64Data = pendingAudioBase64;
+    const mimeType = pendingAudioMime || 'audio/wav';
     const btn = pendingAudioButton;
     
     // Clear pending state AFTER capturing references
     pendingAudioBase64 = null;
+    pendingAudioMime = null;
     pendingAudioButton = null;
     
     if (!base64Data) return;
@@ -1650,7 +1655,7 @@ function bindAudioUnlockHandlers() {
     // Decode base64 and create fresh blob for playback
     try {
       const audioBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-      const blob = new Blob([audioBytes], { type: 'audio/wav' });
+      const blob = new Blob([audioBytes], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       currentAudio = audio;
@@ -1680,6 +1685,7 @@ function bindAudioUnlockHandlers() {
     } catch (err) {
       // Still blocked or decode error - try again on next gesture
       pendingAudioBase64 = base64Data; // Restore for next retry
+      pendingAudioMime = mimeType;
       pendingAudioButton = btn;
       currentAudio = null;
       if (currentAudioUrl) {

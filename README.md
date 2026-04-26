@@ -1,5 +1,4 @@
-# Aira (Aira)
-
+  # Aira (Aira)
 Aira is a multilingual AI companion project with:
 - a web app (Flask + vanilla JS),
 - a standalone voice assistant mode,
@@ -63,9 +62,10 @@ Also supported in BrainAgent with Ollama (if installed locally):
 - Brain agent is compatible with other Ollama models too (for example Llama/Phi family if available locally)
 
 3. TTS (speech synthesis)
-- Primary: Coqui XTTS v2 (`tts_models/multilingual/multi-dataset/xtts_v2`)
-- Fallbacks: `pyttsx3`, then Windows System.Speech fallback
-- Voice cloning supported when profile voice audio is uploaded
+- Primary: ElevenLabs instant voice cloning when `ELEVENLABS_API_KEY` is set
+- Fallback: Coqui XTTS v2 (`tts_models/multilingual/multi-dataset/xtts_v2`)
+- Backup fallbacks: `pyttsx3`, then Windows System.Speech fallback
+- Voice cloning still works offline through XTTS when the cloud API is unavailable
 
 ### B) Earlier model stack used in previous versions (legacy)
 
