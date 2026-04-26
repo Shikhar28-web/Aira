@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 """Authentication routes for SarvSathi (register/login)."""
+=======
+"""Authentication routes for Aira (register/login)."""
+>>>>>>> master
 
 from __future__ import annotations
 

@@ -1,6 +1,11 @@
+<<<<<<< HEAD
 # SarvSathi (Apna Saathi)
 
 SarvSathi is a multilingual AI companion project with:
+=======
+  # Aira (Aira)
+Aira is a multilingual AI companion project with:
+>>>>>>> master
 - a web app (Flask + vanilla JS),
 - a standalone voice assistant mode,
 - a local multi-agent pipeline.
@@ -13,7 +18,11 @@ Current architecture in this repo:
 - Agent 1: `ListenerAgent` (speech-to-text)
 - Agent 2: `BrainAgent` (local LLM reasoning + intent detection)
 - Agent 3: `VoiceAgent` (text-to-speech + optional voice cloning)
+<<<<<<< HEAD
 - `WakeAgent` (always-listening wake phrase: "SarvSathi")
+=======
+- `WakeAgent` (always-listening wake phrase: "Aira")
+>>>>>>> master
 - SQLite data layer: `backend/db.py` (users, companions, chats)
   - Companion-based message history (messages linked by `companion_id`)
   - Conversation-thread helpers may still exist for backward compatibility
@@ -23,7 +32,11 @@ Main backend entrypoint:
 - `backend/server.py`
 
 Standalone voice pipeline entrypoint:
+<<<<<<< HEAD
 - `sarvsathi.py`
+=======
+- `aira.py`
+>>>>>>> master
 
 Frontend:
 - `frontend/templates/index.html`
@@ -36,7 +49,11 @@ Frontend:
 
 Current (offline, Ollama):
 - web default: `qwen2.5:7b-instruct` (in `backend/server.py`)
+<<<<<<< HEAD
 - standalone default: `mistral` (in `sarvsathi.py`)
+=======
+- standalone default: `mistral` (in `aira.py`)
+>>>>>>> master
 - BrainAgent fallback order: `qwen2.5:7b-instruct` → `mistral` → `llama3.1:8b` → `phi3`
 
 Used earlier (legacy cloud stack):
@@ -63,9 +80,16 @@ Also supported in BrainAgent with Ollama (if installed locally):
 - Brain agent is compatible with other Ollama models too (for example Llama/Phi family if available locally)
 
 3. TTS (speech synthesis)
+<<<<<<< HEAD
 - Primary: Coqui XTTS v2 (`tts_models/multilingual/multi-dataset/xtts_v2`)
 - Fallbacks: `pyttsx3`, then Windows System.Speech fallback
 - Voice cloning supported when profile voice audio is uploaded
+=======
+- Primary: ElevenLabs instant voice cloning when `ELEVENLABS_API_KEY` is set
+- Fallback: Coqui XTTS v2 (`tts_models/multilingual/multi-dataset/xtts_v2`)
+- Backup fallbacks: `pyttsx3`, then Windows System.Speech fallback
+- Voice cloning still works offline through XTTS when the cloud API is unavailable
+>>>>>>> master
 
 ### B) Earlier model stack used in previous versions (legacy)
 
@@ -95,7 +119,11 @@ The current codebase has moved to local/offline-first agents and Ollama/Whisper/
 - Speech-to-text transcription endpoint
 - Text-to-speech response endpoint
 - Profile voice sample upload and normalization for cloning
+<<<<<<< HEAD
 - Wake-word trigger support ("SarvSathi")
+=======
+- Wake-word trigger support ("Aira")
+>>>>>>> master
 - Standalone always-on voice assistant loop (without browser)
 - Health/status endpoint exposing active model settings
 
@@ -199,7 +227,11 @@ Chat UI notes:
 ## Project Structure
 
 ```text
+<<<<<<< HEAD
 sarvsathi/
+=======
+aira/
+>>>>>>> master
   backend/
     auth.py
     db.py
@@ -220,7 +252,11 @@ sarvsathi/
     static/
       app.js
       style.css
+<<<<<<< HEAD
   sarvsathi.py
+=======
+  aira.py
+>>>>>>> master
   requirements.txt
   README.md
   LICENSE
@@ -276,7 +312,11 @@ So, once backend is running, frontend is already running too.
 
 ### One-time setup (Windows, PowerShell)
 
+<<<<<<< HEAD
 1. Open PowerShell in the project folder (`sarvsathi`).
+=======
+1. Open PowerShell in the project folder (`aira`).
+>>>>>>> master
 2. Run these commands exactly:
 
 ```powershell
@@ -366,7 +406,11 @@ No separate frontend process is needed.
 From project root:
 
 ```bash
+<<<<<<< HEAD
 python sarvsathi.py
+=======
+python aira.py
+>>>>>>> master
 ```
 
 Flow:
@@ -378,6 +422,7 @@ Flow:
 
 Optional runtime environment variables used by the current code:
 
+<<<<<<< HEAD
 - `SARVSATHI_DEVICE` (default: `cpu`)
 - `WHISPER_MODEL` (default: `medium`)
 - `OLLAMA_MODEL` (default web: `qwen2.5:7b-instruct`)
@@ -385,10 +430,39 @@ Optional runtime environment variables used by the current code:
 - `SARVSATHI_WAKE` (`true`/`false`, default: `true`)
 - `SARVSATHI_PROFILE_TRANSCRIBE` (`true`/`false`, default: `false`)
 - `SARVSATHI_SECRET_KEY` (Flask session secret; set this in production)
+=======
+- `AIRA_DEVICE` (default: `cpu`)
+- `WHISPER_MODEL` (default: `medium`)
+- `GROQ_API_KEY` (required for Groq factual/chat responses)
+- `GROQ_MODEL` (default: `llama-3.1-8b-instant`)
+- `GROQ_URL` (default: `https://api.groq.com/openai/v1/chat/completions`)
+- `OLLAMA_MODEL` (default web: `qwen2.5:7b-instruct`)
+- `OLLAMA_URL` (default: `http://localhost:11434`)
+- `AIRA_WAKE` (`true`/`false`, default: `true`)
+- `AIRA_PROFILE_TRANSCRIBE` (`true`/`false`, default: `false`)
+- `AIRA_SECRET_KEY` (Flask session secret; set this in production)
+>>>>>>> master
 - `APP_HOST` (default: `127.0.0.1`)
 - `APP_PORT` (default: `5000`)
 - `FLASK_DEBUG` (`true`/`false`, default: `false`)
 
+<<<<<<< HEAD
+=======
+### Groq key setup for each user
+
+Every friend should use their own Groq key.
+
+Option 1 (recommended): add `.env` in project root:
+
+```env
+GROQ_API_KEY=your_groq_key_here
+GROQ_MODEL=llama-3.1-8b-instant
+```
+
+Option 2: login and open `/settings`, then save Groq API key + model.
+This stores key in that browser only and sends it securely to backend session.
+
+>>>>>>> master
 ## Performance Tuning (Low Lag)
 
 Use these settings for faster and more stable local responses:
@@ -406,7 +480,11 @@ Use these settings for faster and more stable local responses:
 
 ## Notes
 
+<<<<<<< HEAD
 - The app name appears as both "SarvSathi" and "Apna Saathi" in different parts of code/UI.
+=======
+- The app name appears as both "Aira" and "Aira" in different parts of code/UI.
+>>>>>>> master
 - Current backend is offline-first and does not require cloud API keys for core local pipeline.
 - If Ollama is not running, chat quality/availability will degrade to fallback responses.
 - Database tables are initialized automatically on backend startup via `init_db()`.

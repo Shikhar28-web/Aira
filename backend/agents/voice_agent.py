@@ -2,7 +2,11 @@
 AGENT 4 — VOICE AGENT
 ======================
 RESPONSIBILITY: Text-to-Speech synthesis ONLY.
+<<<<<<< HEAD
 Converts text reply into spoken audio using Coqui XTTS v2.
+=======
+Converts text reply into spoken audio using a cloned-voice backend when available.
+>>>>>>> master
 
 INPUT:
     text            (str)          - Response text to synthesize
@@ -12,7 +16,12 @@ INPUT:
 PROCESSING:
     1. Normalize text for TTS (convert Roman→Devanagari if Hindi)
     2. Apply emotion-based prosody modulation (speed, tone)
+<<<<<<< HEAD
     3. Synthesize audio using XTTS v2 (or fallback: pyttsx3)
+=======
+    3. Synthesize audio using ElevenLabs cloned voice when configured
+       (or fallback: Coqui XTTS v2, then pyttsx3)
+>>>>>>> master
     4. Return Base64-encoded WAV string
 
 OUTPUT:
@@ -26,6 +35,13 @@ IMPORTANT DATA FLOW RULES:
 
 Fallback strategy
 -----------------
+<<<<<<< HEAD
+=======
+Preferred clone backend when configured:
+- ElevenLabs IVC voice cloning via `ELEVENLABS_API_KEY`
+
+Local fallback:
+>>>>>>> master
 XTTS v2 natively supports: en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar, zh-cn, ja, hu, ko, **hi**
 
 For unsupported codes (bn-IN, ta-IN, te-IN, kn-IN, ml-IN, mr-IN, gu-IN, pa-IN),
@@ -34,6 +50,10 @@ fallback to Hindi ("hi") or pyttsx3 if XTTS v2 unavailable.
 
 import base64
 import io
+<<<<<<< HEAD
+=======
+import json
+>>>>>>> master
 import os
 import subprocess
 import sys
@@ -61,6 +81,11 @@ _XTTS_LANG: dict[str, str] = {
 }
 
 _XTTS_SAMPLE_RATE = 24_000   # Hz (XTTS v2 native output rate)
+<<<<<<< HEAD
+=======
+_ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
+_ELEVENLABS_DEFAULT_MODEL = "eleven_multilingual_v2"
+>>>>>>> master
 
 
 def _normalize_gender_hint(speaker: str | None) -> str | None:
@@ -124,7 +149,11 @@ def _patch_torch_load_for_xtts() -> None:
     except Exception:
         return
 
+<<<<<<< HEAD
     if getattr(torch, "_sarvsathi_xtts_torchload_patched", False):
+=======
+    if getattr(torch, "_aira_xtts_torchload_patched", False):
+>>>>>>> master
         return
 
     original_load = torch.load
@@ -134,7 +163,11 @@ def _patch_torch_load_for_xtts() -> None:
         return original_load(*args, **kwargs)
 
     torch.load = _patched_load
+<<<<<<< HEAD
     torch._sarvsathi_xtts_torchload_patched = True
+=======
+    torch._aira_xtts_torchload_patched = True
+>>>>>>> master
 
 
 def _patch_torchaudio_load_for_xtts() -> None:
@@ -152,7 +185,11 @@ def _patch_torchaudio_load_for_xtts() -> None:
     except Exception:
         return
 
+<<<<<<< HEAD
     if getattr(torchaudio, "_sarvsathi_xtts_torchaudio_patched", False):
+=======
+    if getattr(torchaudio, "_aira_xtts_torchaudio_patched", False):
+>>>>>>> master
         return
 
     original_load = torchaudio.load
@@ -169,15 +206,25 @@ def _patch_torchaudio_load_for_xtts() -> None:
                 raise original_exc
 
     torchaudio.load = _patched_load
+<<<<<<< HEAD
     torchaudio._sarvsathi_xtts_torchaudio_patched = True
+=======
+    torchaudio._aira_xtts_torchaudio_patched = True
+>>>>>>> master
 
 
 class VoiceAgent:
     """
     Text-to-speech synthesis with GPU acceleration.
 
+<<<<<<< HEAD
     Primary   : Coqui XTTS v2  (``pip install TTS``)
     Fallback  : pyttsx3         (bundled with most Python environments)
+=======
+    Primary   : ElevenLabs cloned voice (when ELEVENLABS_API_KEY is set)
+    Fallback  : Coqui XTTS v2  (``pip install TTS``)
+    Backup    : pyttsx3         (bundled with most Python environments)
+>>>>>>> master
 
     XTTS v2 requires a short reference WAV for its voice clone mechanism.
     The agent auto-generates one using pyttsx3 on first run and caches it
@@ -197,6 +244,13 @@ class VoiceAgent:
         self.device = device
         self._xtts_ok: bool | None = None   # None = not yet probed
         self._last_xtts_attempt_ts: float = 0.0
+<<<<<<< HEAD
+=======
+        self._last_audio_mime = "audio/wav"
+        self._tts_backend = (os.getenv("AIRA_TTS_BACKEND", "auto") or "auto").strip().lower()
+        self._elevenlabs_api_key = (os.getenv("ELEVENLABS_API_KEY", "") or "").strip()
+        self._elevenlabs_model_id = (os.getenv("ELEVENLABS_MODEL", _ELEVENLABS_DEFAULT_MODEL) or _ELEVENLABS_DEFAULT_MODEL).strip()
+>>>>>>> master
 
         # Prepare assets directory
         self._assets_dir = os.path.join(
@@ -207,6 +261,40 @@ class VoiceAgent:
         self._speaker_wav_female = os.path.join(self._assets_dir, "default_speaker_female.wav")
         self._speaker_wav_male = os.path.join(self._assets_dir, "default_speaker_male.wav")
 
+<<<<<<< HEAD
+=======
+    def last_audio_mime(self) -> str:
+        return self._last_audio_mime
+
+    @staticmethod
+    def _voice_metadata_path(speaker_wav: str | None) -> str | None:
+        if not speaker_wav:
+            return None
+        stem, _ = os.path.splitext(speaker_wav)
+        return f"{stem}.json"
+
+    @staticmethod
+    def _read_voice_metadata(speaker_wav: str | None) -> dict[str, str]:
+        meta_path = VoiceAgent._voice_metadata_path(speaker_wav)
+        if not meta_path or not os.path.exists(meta_path):
+            return {}
+        try:
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _preferred_backend(self) -> str:
+        if self._tts_backend in {"elevenlabs", "cloud"}:
+            return "elevenlabs"
+        if self._tts_backend in {"xtts", "local"}:
+            return "xtts"
+        if self._elevenlabs_api_key:
+            return "elevenlabs"
+        return "xtts"
+
+>>>>>>> master
     # ── Public API ─────────────────────────────────────────────────────────
 
     def synthesize(
@@ -238,6 +326,7 @@ class VoiceAgent:
         if not text:
             return None, False
 
+<<<<<<< HEAD
         clone_requested = bool(speaker_wav and os.path.exists(speaker_wav))
 
         # STEP 1: Normalize text for TTS (emotion-based prosody)
@@ -247,10 +336,34 @@ class VoiceAgent:
             language_code=language_code,
             preserve_timbre=clone_requested,
         )
+=======
+        self._last_audio_mime = "audio/wav"
+
+        # STEP 1: Normalize text for TTS (emotion-based prosody)
+        pause_text, speed = self._prepare_tts_text(text, emotion, language_code=language_code)
+>>>>>>> master
         print(f"[TTS] Emotion={emotion}, Language={language_code}, Speed={speed:.2f}")
         print(f"[TTS] Text={pause_text[:60]}..." if len(pause_text) > 60 else f"[TTS] Text={pause_text}")
         gender_hint = _normalize_gender_hint(speaker)
 
+<<<<<<< HEAD
+=======
+        clone_requested = bool(speaker_wav and os.path.exists(speaker_wav))
+        voice_metadata = self._read_voice_metadata(speaker_wav)
+        external_voice_id = (voice_metadata.get("voice_id") or "").strip()
+        external_backend = (voice_metadata.get("backend") or "").strip().lower()
+
+        if clone_requested and external_backend == "elevenlabs" and external_voice_id and self._preferred_backend() == "elevenlabs":
+            audio = self._elevenlabs_synthesize(
+                text=pause_text,
+                voice_id=external_voice_id,
+                language_code=language_code,
+                emotion=emotion,
+            )
+            if audio:
+                return audio, True
+
+>>>>>>> master
         # For explicit male/female selection without clone sample, prefer
         # native system voices first for clearer gender separation.
         if not clone_requested and gender_hint in {"male", "female"}:
@@ -303,12 +416,16 @@ class VoiceAgent:
         return self._windows_system_speech_synthesize(pause_text), False
 
     @staticmethod
+<<<<<<< HEAD
     def _prepare_tts_text(
         text: str,
         emotion: str,
         language_code: str = "hi-IN",
         preserve_timbre: bool = False,
     ) -> tuple[str, float]:
+=======
+    def _prepare_tts_text(text: str, emotion: str, language_code: str = "hi-IN") -> tuple[str, float]:
+>>>>>>> master
         """
         PROSODY MODULATION FOR TTS ONLY
         ===============================
@@ -338,12 +455,15 @@ class VoiceAgent:
         pause_text = (text or "").strip()
         is_hindi = (language_code or "").startswith("hi")
 
+<<<<<<< HEAD
         # For clone requests, keep timing/text untouched as much as possible
         # to preserve the reference speaker identity.
         if preserve_timbre:
             pause_text = " ".join(pause_text.split())
             return pause_text, 1.0
 
+=======
+>>>>>>> master
         # Keep Hindi modulation subtle; strong shifts make cloned output unnatural.
         if emotion == "sadness":
             speed = 0.95 if is_hindi else 0.92
@@ -366,6 +486,12 @@ class VoiceAgent:
 
     def _load_xtts_blocking(self) -> None:
         """Load XTTS synchronously; used for first voice-clone request."""
+<<<<<<< HEAD
+=======
+        if self._preferred_backend() == "elevenlabs":
+            self._xtts_ok = True
+            return
+>>>>>>> master
         with VoiceAgent._xtts_lock:
             if VoiceAgent._xtts_model is not None:
                 self._xtts_ok = True
@@ -388,6 +514,12 @@ class VoiceAgent:
 
     def _load_xtts_background(self) -> None:
         """Load XTTS v2 in a background thread so the first TTS call isn't blocked."""
+<<<<<<< HEAD
+=======
+        if self._preferred_backend() == "elevenlabs":
+            self._xtts_ok = True
+            return
+>>>>>>> master
         with VoiceAgent._xtts_lock:
             if VoiceAgent._xtts_model is not None:
                 self._xtts_ok = True
@@ -409,11 +541,31 @@ class VoiceAgent:
                 self._xtts_ok = False
 
     def is_clone_ready(self) -> bool:
+<<<<<<< HEAD
         """True when XTTS is loaded and clone synthesis is available."""
         return VoiceAgent._xtts_model is not None and self._xtts_ok is True
 
     def preload_clone_model(self, blocking: bool = False) -> None:
         """Trigger XTTS model preload so voice cloning becomes ready earlier."""
+=======
+        """True when a clone-capable backend is available for synthesis."""
+        if self._preferred_backend() == "elevenlabs":
+            return bool(self._elevenlabs_api_key)
+        return VoiceAgent._xtts_model is not None and self._xtts_ok is True
+
+    def clone_backend(self) -> str:
+        if self._preferred_backend() == "elevenlabs":
+            return "elevenlabs"
+        if VoiceAgent._xtts_model is not None and self._xtts_ok is True:
+            return "xtts"
+        return "fallback"
+
+    def preload_clone_model(self, blocking: bool = False) -> None:
+        """Trigger XTTS model preload so voice cloning becomes ready earlier."""
+        if self._preferred_backend() == "elevenlabs":
+            self._xtts_ok = True
+            return
+>>>>>>> master
         if VoiceAgent._xtts_model is not None:
             self._xtts_ok = True
             return
@@ -509,8 +661,62 @@ class VoiceAgent:
             else:
                 raise
         cloned = bool(speaker_wav and os.path.exists(speaker_wav))
+<<<<<<< HEAD
         return _array_to_wav_b64(wav, _XTTS_SAMPLE_RATE), cloned
 
+=======
+        self._last_audio_mime = "audio/wav"
+        return _array_to_wav_b64(wav, _XTTS_SAMPLE_RATE), cloned
+
+    def _elevenlabs_synthesize(
+        self,
+        text: str,
+        voice_id: str,
+        language_code: str,
+        emotion: str = "neutral",
+    ) -> str | None:
+        if not self._elevenlabs_api_key or not voice_id:
+            return None
+
+        import requests  # noqa: PLC0415
+
+        payload = {
+            "text": text,
+            "model_id": self._elevenlabs_model_id,
+            "voice_settings": {
+                "stability": 0.42 if emotion in {"sadness", "fear"} else 0.5,
+                "similarity_boost": 0.85,
+                "style": 0.35 if emotion in {"joy", "anger"} else 0.2,
+                "use_speaker_boost": True,
+            },
+        }
+
+        lang_code = (language_code or "").strip().lower()
+        if lang_code.startswith("hi"):
+            payload["language_code"] = "hi"
+        elif lang_code.startswith("en"):
+            payload["language_code"] = "en"
+
+        try:
+            response = requests.post(
+                f"{_ELEVENLABS_API_URL}/text-to-speech/{voice_id}",
+                params={"output_format": "mp3_44100_128"},
+                headers={
+                    "xi-api-key": self._elevenlabs_api_key,
+                    "Content-Type": "application/json",
+                    "Accept": "audio/mpeg",
+                },
+                json=payload,
+                timeout=45,
+            )
+            response.raise_for_status()
+            self._last_audio_mime = "audio/mpeg"
+            return base64.b64encode(response.content).decode("utf-8")
+        except Exception as exc:
+            print(f"[VoiceAgent] ElevenLabs synthesize failed: {exc}")
+            return None
+
+>>>>>>> master
     def _generate_speaker_wav(
         self,
         gender_hint: str | None = None,
@@ -529,7 +735,11 @@ class VoiceAgent:
             engine.setProperty("rate", 150)
             target = out_path or self._speaker_wav
             engine.save_to_file(
+<<<<<<< HEAD
                 "Hello, I am SarvSathi, your intelligent AI assistant.",
+=======
+                "Hello, I am Aira, your intelligent AI assistant.",
+>>>>>>> master
                 target,
             )
             engine.runAndWait()

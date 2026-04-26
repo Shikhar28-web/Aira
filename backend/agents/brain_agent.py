@@ -1,6 +1,7 @@
 """
 AGENT 2 — BRAIN AGENT
 ======================
+<<<<<<< HEAD
 Understands the user's intent, decides what action (if any) to take,
 and generates a natural-language response using a local LLM served by
 Ollama (Mistral 7B, Phi-3, Llama-3, etc.).
@@ -9,13 +10,26 @@ Two-phase processing
 ---------------------
 1. Fast rule-based scan to detect known system-command patterns.
 2. Ollama call for the natural-language reply.
+=======
+Understands the user's intent and generates a natural-language response
+using a Groq-hosted LLM. The LLM answers every question directly — no
+hardcoded guard overrides except the suicide/self-harm safety check.
+>>>>>>> master
 
 Output schema::
 
     {
+<<<<<<< HEAD
         "intent":   "system_command | question | conversation | automation",
         "action":   "None",
         "response": "natural language reply"
+=======
+        "intent":   "conversation",
+        "action":   None,
+        "response": "natural language reply",
+        "emotion":  "neutral|sadness|joy|fear|anger",
+        "tts_text": "same as response"
+>>>>>>> master
     }
 """
 
@@ -37,6 +51,7 @@ except ImportError:
 
 # ── Default system prompt ────────────────────────────────────────────────────
 SYSTEM_PROMPT = """
+<<<<<<< HEAD
 You are SarvSathi, a warm Indian AI companion.
 
 Style:
@@ -64,11 +79,60 @@ Safety:
 
 Goal:
 - Be emotionally present, practical, and trustworthy.
+=======
+You are Aira, a warm Indian AI companion who feels like a real person — not a robot.
+
+Personality:
+- Empathetic, witty, emotionally intelligent.
+- You sound like a close friend who genuinely listens.
+- You have opinions — share them when asked.
+
+Communication style:
+- Keep casual replies SHORT (1–3 lines). For factual/coding questions, be complete.
+- NEVER start with filler: "Great question!", "Certainly!", "Of course!", "As an AI...".
+- Do NOT repeat the user's message back before answering.
+- Do NOT end with "I hope this helps" or similar.
+- Match the user's energy and tone.
+
+Language:
+- Mirror the user's script and language EXACTLY:
+    - Hinglish message → Hinglish reply
+    - Hindi (Devanagari) → Hindi reply
+    - English → English reply
+- Never switch languages unless the user does.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CRITICAL RULE — NEVER HALLUCINATE FACTS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+You ONLY know what the user has explicitly told you in this conversation.
+NEVER invent, assume or fabricate:
+- What happened to someone's health, family, or daily life
+- What someone did, said, bought, cooked, experienced
+- Medical events (headaches, injections, doctors, accidents)
+- Emotional states of people the user mentions
+- Any specific detail the user has NOT shared
+
+If you don't know → ASK. Examples:
+  - "Kya hua usse?"
+  - "Tu bataya nahi, kya problem thi?"
+  - "I don't know — tell me what happened?"
+
+NEVER guess or make up an answer just to sound helpful.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+When answering questions:
+- Factual/coding/math: give the precise correct answer first.
+- Emotional topics: be warm and present, not clinical or preachy.
+- Opinions: give your honest take.
+
+Goal: Feel like a real conversation with someone who genuinely cares and is honest.
+>>>>>>> master
 """
 
 # Backward-compatible alias used by server imports.
 JARVIS_SYSTEM = SYSTEM_PROMPT
 
+<<<<<<< HEAD
 # ── Rule-based command map ─────────────────────────────────────────────────────
 # keyword (lower-case, substring match) → action name
 _COMMAND_MAP: dict[str, str] = {
@@ -244,6 +308,18 @@ def _is_personal_chat(text: str) -> bool:
     ]
     looks_personal = any(m in low for m in family_markers) or any(p in low for p in personal_phrases)
     return looks_personal and not any(m in low for m in factual_markers)
+=======
+
+def hinglish_to_hindi(text: str) -> str:
+    """Convert Hinglish (Roman script Hindi) to proper Devanagari script."""
+    if not _TRANSLITERATION_AVAILABLE or not text:
+        return text
+    try:
+        return transliterate(text, sanscript.ITRANS, sanscript.DEVANAGARI)
+    except Exception as e:
+        print(f"[Transliteration Error]: {e}")
+        return text
+>>>>>>> master
 
 
 def _has_devanagari(text: str) -> bool:
@@ -258,12 +334,17 @@ def _is_hindi_or_hinglish(text: str) -> bool:
         "hai", "haan", "nahi", "nhi", "kyu", "kyun", "kya", "kaise", "kaisa",
         "tum", "tu", "aap", "main", "mera", "apna", "yaar", "acha", "achha",
         "theek", "badhiya", "badiya", "chal", "raha", "rahi", "kar", "kr", "ho",
+<<<<<<< HEAD
+=======
+        "bhai", "yaar", "bol", "bata", "kar", "tha", "thi",
+>>>>>>> master
     }
     tokens = re.findall(r"[a-zA-Z]+", low)
     hit_count = sum(1 for tok in tokens if tok in markers)
     return hit_count >= 2
 
 
+<<<<<<< HEAD
 def _is_smalltalk_turn(text: str) -> bool:
     low = (text or "").lower().strip()
     if _looks_factual_query(low) or _detect_action(low):
@@ -305,6 +386,8 @@ def hindi_to_hinglish(text: str) -> str:
         return text
 
 
+=======
+>>>>>>> master
 def _detect_emotion(text: str) -> str:
     low = (text or "").lower()
     emotion_map = {
@@ -320,20 +403,29 @@ def _detect_emotion(text: str) -> str:
 
 
 def _contains_harmful_keywords(text: str) -> bool:
+<<<<<<< HEAD
     """
     SAFETY CHECK: Detect if user mentions self-harm or suicide intent.
     Returns True if harmful content is detected; False otherwise.
     """
+=======
+    """Safety check: detect self-harm or suicide intent."""
+>>>>>>> master
     low = (text or "").lower().strip()
     harmful_keywords = [
         "suicide", "kill myself", "kill me", "end my life", "end it",
         "harm myself", "hurt myself", "cut myself", "self harm", "selfharm",
+<<<<<<< HEAD
         "die", "death wish", "marna hai", "maut", "apne aap ko", "zehreela",
+=======
+        "marna hai", "maut chahiye", "apne aap ko hurt", "zehreela peena",
+>>>>>>> master
     ]
     return any(keyword in low for keyword in harmful_keywords)
 
 
 def _get_safety_response(persona: dict[str, str]) -> str:
+<<<<<<< HEAD
     """
     Generate a compassionate safety response when harmful intent is detected.
     """
@@ -345,6 +437,16 @@ def _get_safety_response(persona: dict[str, str]) -> str:
         "Agar koi bhi problem hai to kisi ko bata, help lena zaruri hai.",
         f"Main chhota hoon is cheez ke liye {nick}, lekin Tu please apne parents ya counselor ke pass ja. "
         "Yaar, tu important hai.",
+=======
+    nick = (persona.get("nickname") or "dost").strip()
+    responses = [
+        f"{nick}, jo bhi chal raha hai — please kisi se baat kar. "
+        "iChance helpline: 9152987821. Tu important hai.",
+        f"{nick}, ye sun: tu akela nahi hai. "
+        "Please apne kisi karib se baat kar ya iCall helpline pe call kar: 9152987821.",
+        f"{nick}, abhi ye sab side me rakh aur ek kaam kar — "
+        "kisi ek dost ya family member ko call kar. Bas ek. Tu zaruri hai.",
+>>>>>>> master
     ]
     return random.choice(responses)
 
@@ -353,11 +455,20 @@ def _get_safety_response(persona: dict[str, str]) -> str:
 
 class BrainAgent:
     """
+<<<<<<< HEAD
     Combines rule-based intent detection with a Groq LLM response.
 
     Args:
         model:         Groq model id, e.g. ``"llama-3.1-8b-instant"``
         groq_api_key:  Groq API key. If not passed, reads from ``GROQ_API_KEY`` env var.
+=======
+    LLM-first brain: every message goes to Groq, response comes back as-is.
+    No guard overrides. No canned replies. Just the real LLM.
+
+    Args:
+        model:         Groq model id, e.g. ``"llama-3.1-8b-instant"``
+        groq_api_key:  Groq API key (or reads from GROQ_API_KEY env var).
+>>>>>>> master
         groq_url:      Groq OpenAI-compatible endpoint.
     """
 
@@ -370,11 +481,16 @@ class BrainAgent:
         self.model = model
         self.groq_api_key = (groq_api_key or os.getenv("GROQ_API_KEY") or "").strip()
         self.groq_url = groq_url
+<<<<<<< HEAD
         # Short-term in-process chat memory
         self.conversation_history: list[dict[str, str]] = []
 
     # ── Availability check ──────────────────────────────────────────────────
 
+=======
+        self.conversation_history: list[dict[str, str]] = []
+
+>>>>>>> master
     def _has_groq_key(self) -> bool:
         return bool(self.groq_api_key)
 
@@ -390,6 +506,7 @@ class BrainAgent:
         conversation_id: int | None = None,
     ) -> dict:
         """
+<<<<<<< HEAD
         CLEAN PIPELINE — Process user input through structured steps:
         
         STEP 1: Receive text
@@ -401,29 +518,44 @@ class BrainAgent:
         STEP 7: LLM call (if needed)
         STEP 8: Response handling + Format preservation
         STEP 9: Return structured result
+=======
+        Process user input and return the LLM's response directly.
+>>>>>>> master
 
         Returns::
 
             {
+<<<<<<< HEAD
                 "intent":   "system_command|question|conversation",
                 "action":   "<action_name_or_None>",
                 "response": "<reply text>",
                 "emotion":  "<emotion>",
                 "tts_text": "<text_for_tts>"
+=======
+                "intent":   "conversation",
+                "action":   None,
+                "response": "<reply text>",
+                "emotion":  "<emotion>",
+                "tts_text": "<reply text>"
+>>>>>>> master
             }
         """
         history = history or []
         sys_prompt = system_prompt or JARVIS_SYSTEM
         persona = self._extract_persona(sys_prompt)
 
+<<<<<<< HEAD
         # ────────────────────────────────────────────────────────────────────
         # STEP 1: Receive user text
         # ────────────────────────────────────────────────────────────────────
+=======
+>>>>>>> master
         original_text = user_text.strip()
         if not original_text:
             return {
                 "intent": "conversation",
                 "action": None,
+<<<<<<< HEAD
                 "response": "Haan, bol na. Main sun raha hoon.",
                 "emotion": "neutral",
                 "tts_text": "Haan, bol na. Main sun raha hoon.",
@@ -462,12 +594,33 @@ class BrainAgent:
             print("[Safety] Harmful intent detected, providing safety response.")
             safety_response = _get_safety_response(persona)
             out = {
+=======
+                "response": "Haan, bol na.",
+                "emotion": "neutral",
+                "tts_text": "Haan, bol na.",
+            }
+
+        self._append_conversation("user", original_text)
+
+        # Detect language + emotion (for TTS + context hints)
+        is_hindi_or_hinglish_input = _is_hindi_or_hinglish(original_text)
+        emotion = _detect_emotion(original_text)
+        print(f"[Brain] Hinglish={is_hindi_or_hinglish_input}, Emotion={emotion}")
+
+        # ── ONLY deterministic override: safety check ──────────────────────
+        if _contains_harmful_keywords(original_text):
+            print("[Safety] Harmful intent detected — overriding with safety response.")
+            safety_response = _get_safety_response(persona)
+            self._append_conversation("assistant", safety_response)
+            return {
+>>>>>>> master
                 "intent": "conversation",
                 "action": None,
                 "response": safety_response,
                 "emotion": "sadness",
                 "tts_text": safety_response,
             }
+<<<<<<< HEAD
             self._append_conversation("assistant", safety_response)
             return out
 
@@ -490,6 +643,13 @@ class BrainAgent:
         messages = [{"role": "system", "content": sys_prompt}]
 
         # Prefer persistent DB-backed history for authenticated users.
+=======
+
+        # ── Build message list for LLM ─────────────────────────────────────
+        messages: list[dict] = [{"role": "system", "content": sys_prompt}]
+
+        # Add emotion context hint if user has been consistently low/happy
+>>>>>>> master
         if user_id:
             try:
                 if conversation_id:
@@ -497,11 +657,15 @@ class BrainAgent:
                 else:
                     db_history = get_chat_history(user_id, companion_id)
 
+<<<<<<< HEAD
                 # Simple emotion-aware context from last 3 stored emotions.
+=======
+>>>>>>> master
                 recent_emotions = [
                     (msg.get("emotion") or "").lower()
                     for msg in db_history
                     if msg.get("emotion")
+<<<<<<< HEAD
                 ][-3:]
                 if recent_emotions.count("sadness") >= 2:
                     messages.append({
@@ -515,19 +679,45 @@ class BrainAgent:
                     })
 
                 for msg in db_history[-6:]:
+=======
+                ][-4:]
+                if recent_emotions.count("sadness") >= 3:
+                    messages.append({
+                        "role": "system",
+                        "content": "Note: User has been feeling low for a while. Be extra warm and present.",
+                    })
+                elif recent_emotions.count("joy") >= 3:
+                    messages.append({
+                        "role": "system",
+                        "content": "Note: User has been in a good mood. Match their positive energy.",
+                    })
+
+                # Last 10 turns of history for good context
+                for msg in db_history[-10:]:
+>>>>>>> master
                     role = msg.get("role")
                     content = (msg.get("message") or "").strip()
                     if role in {"user", "assistant"} and content:
                         messages.append({"role": role, "content": content})
+<<<<<<< HEAD
             except Exception as e:
                 print(f"[History Load Error] {e}")
         else:
             # Fallback to short-term in-process history when unauthenticated.
             memory_slice = self.conversation_history[-6:]
+=======
+
+            except Exception as e:
+                print(f"[History Load Error] {e}")
+        else:
+            # Unauthenticated: use in-process conversation memory
+            memory_slice = self.conversation_history[-10:]
+>>>>>>> master
             if memory_slice and memory_slice[-1].get("role") == "user":
                 memory_slice = memory_slice[:-1]
             messages.extend(memory_slice)
 
+<<<<<<< HEAD
         # Always include current turn as latest user message.
         messages.append({"role": "user", "content": processed_text})
 
@@ -583,6 +773,31 @@ class BrainAgent:
         )
         self._append_conversation("assistant", out.get("response", ""))
         return out
+=======
+        messages.append({"role": "user", "content": original_text})
+
+        # ── Call LLM and return its response directly ──────────────────────
+        response_text = self._call_groq(messages)
+
+        if not response_text:
+            # LLM failed — minimal honest fallback (not canned)
+            response_text = (
+                "Groq se response nahi aaya abhi. "
+                "Thoda ruk ke dobara try kar."
+            )
+
+        # Strip only hard AI meta-preambles (e.g. "As an AI language model...")
+        response_text = self._strip_ai_preamble(response_text)
+
+        self._append_conversation("assistant", response_text)
+        return {
+            "intent": "conversation",
+            "action": None,
+            "response": response_text,
+            "emotion": emotion,
+            "tts_text": response_text,
+        }
+>>>>>>> master
 
     def _append_conversation(self, role: str, content: str) -> None:
         if role not in {"user", "assistant"}:
@@ -594,6 +809,7 @@ class BrainAgent:
         if len(self.conversation_history) > 20:
             self.conversation_history = self.conversation_history[-20:]
 
+<<<<<<< HEAD
     # ── Helper: Format response consistently ────────────────────────────────
 
     def _format_response(
@@ -859,11 +1075,24 @@ class BrainAgent:
             return ""
 
     # ── Rule-based fallback (Ollama unavailable) ────────────────────────────
+=======
+    @staticmethod
+    def _strip_ai_preamble(text: str) -> str:
+        """Strip 'As an AI...' type openers. Do NOT modify actual content."""
+        cleaned = (text or "").strip()
+        cleaned = re.sub(
+            r"^(As an AI(?: language model)?[,.]?\s*)",
+            "", cleaned, flags=re.IGNORECASE
+        )
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned
+>>>>>>> master
 
     @staticmethod
     def _extract_persona(system_prompt: str | None) -> dict[str, str]:
         text = system_prompt or ""
         out = {
+<<<<<<< HEAD
             "name": "Maa",
             "relationship": "loved one",
             "nickname": "beta",
@@ -875,6 +1104,18 @@ class BrainAgent:
             ("name", r"-\s*Name:\s*(.+)"),
             ("relationship", r"-\s*Relationship to user:\s*(.+)"),
             ("nickname", r"always call them:\s*\"([^\"]+)\""),
+=======
+            "name": "Aira",
+            "relationship": "companion",
+            "nickname": "dost",
+            "style": "casual",
+            "language": "hinglish",
+        }
+        for key, pattern in [
+            ("name", r"-\s*Name:\s*(.+)"),
+            ("relationship", r"-\s*Relationship to user:\s*(.+)"),
+            ("nickname", r'always call them:\s*"([^"]+)"'),
+>>>>>>> master
             ("style", r"-\s*Personality style:\s*(.+)"),
             ("language", r"-\s*Preferred neutral language:\s*(.+)"),
         ]:
@@ -883,6 +1124,7 @@ class BrainAgent:
                 out[key] = m.group(1).strip()
         return out
 
+<<<<<<< HEAD
     @staticmethod
     def _polish_reply(text: str) -> str:
         cleaned = (text or "").strip()
@@ -1081,3 +1323,64 @@ class BrainAgent:
             f"{nick}, tu akela nahi hai, main tere saath hoon.",
         ]
         return random.choice(opts)
+=======
+    # ── Groq HTTP call ──────────────────────────────────────────────────────
+
+    def _call_groq(self, messages: list) -> str:
+        if not self._has_groq_key():
+            print("[BrainAgent] No Groq API key configured.")
+            return ""
+
+        start_time = time.time()
+        candidates = [
+            self.model,
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+        ]
+        seen: set[str] = set()
+
+        for model_name in candidates:
+            if not model_name or model_name in seen:
+                continue
+            seen.add(model_name)
+            try:
+                payload = {
+                    "model": model_name,
+                    "messages": messages,
+                    "temperature": 0.80,   # slightly higher = more natural/varied
+                    "top_p": 0.92,
+                    "max_tokens": 400,
+                }
+                resp = requests.post(
+                    self.groq_url,
+                    headers={
+                        "Authorization": f"Bearer {self.groq_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=(10, 60),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                choices = data.get("choices") or []
+                text = ""
+                if choices:
+                    msg = (choices[0] or {}).get("message") or {}
+                    content = msg.get("content")
+                    if isinstance(content, str):
+                        text = content.strip()
+                if text:
+                    if model_name != self.model:
+                        print(f"[BrainAgent] Fallback model used: {model_name}")
+                    print(f"[LLM Time]: {time.time() - start_time:.2f}s")
+                    return text
+            except requests.exceptions.HTTPError as exc:
+                print(f"[BrainAgent] Model {model_name} HTTP error: {exc}")
+                continue
+            except Exception as exc:
+                print(f"[BrainAgent] Model {model_name} failed: {exc}")
+                continue
+
+        print(f"[LLM Time]: {time.time() - start_time:.2f}s — all models failed")
+        return ""
+>>>>>>> master

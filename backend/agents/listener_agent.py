@@ -156,7 +156,11 @@ class ListenerAgent:
     ) -> dict:
         """
         Transcribe a float32 numpy array (values in [-1, 1]) directly.
+<<<<<<< HEAD
         Used by the standalone sarvsathi.py script.
+=======
+        Used by the standalone aira.py script.
+>>>>>>> master
         """
         whisper_lang = LANG_MAP.get(language_code) if language_code else None
         model = self._get_model()
