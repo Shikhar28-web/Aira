@@ -1,10 +1,5 @@
 """
-<<<<<<< HEAD
-SarvSathi — Fully Offline AI Assistant
-=======
 Aira — Fully Offline AI Assistant
->>>>>>> master
-=======================================
 4-agent pipeline — no cloud APIs required.
 Run: python server.py
 Then open: http://127.0.0.1:5000
@@ -12,10 +7,7 @@ Then open: http://127.0.0.1:5000
 
 import os
 import sys
-<<<<<<< HEAD
-=======
 import json
->>>>>>> master
 import re
 import uuid
 import tempfile
@@ -24,24 +16,18 @@ from glob import glob
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, session
 from flask_cors import CORS
-<<<<<<< HEAD
-=======
 from dotenv import load_dotenv
 import requests
->>>>>>> master
 
 # ── Make sure the backend package is importable ───────────────────────────────
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
-<<<<<<< HEAD
-=======
 _PROJECT_ROOT = os.path.abspath(os.path.join(_BACKEND_DIR, ".."))
 load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 load_dotenv(os.path.join(_BACKEND_DIR, ".env"))
 
->>>>>>> master
 from agents.listener_agent import ListenerAgent
 from agents.brain_agent    import BrainAgent, JARVIS_SYSTEM, hinglish_to_hindi
 from agents.voice_agent    import VoiceAgent
@@ -65,15 +51,6 @@ from db import (
 )
 
 # ── Config from environment (all optional — sensible defaults) ────────────────
-<<<<<<< HEAD
-_DEVICE       = os.getenv("SARVSATHI_DEVICE",  "cpu")
-_WHISPER_MODEL = os.getenv("WHISPER_MODEL",    "medium")
-_GROQ_MODEL    = os.getenv("GROQ_MODEL",       "llama-3.1-8b-instant")
-_GROQ_API_KEY  = os.getenv("GROQ_API_KEY",     "")
-_GROQ_URL      = os.getenv("GROQ_URL",         "https://api.groq.com/openai/v1/chat/completions")
-_WAKE_ENABLED  = os.getenv("SARVSATHI_WAKE",   "true").lower() in {"1", "true", "yes"}
-_PROFILE_TRANSCRIBE = os.getenv("SARVSATHI_PROFILE_TRANSCRIBE", "false").lower() in {"1", "true", "yes"}
-=======
 _DEVICE       = os.getenv("AIRA_DEVICE",  "cpu")
 _WHISPER_MODEL = os.getenv("WHISPER_MODEL",    "medium")
 _GROQ_MODEL    = os.getenv("GROQ_MODEL",       "llama-3.3-70b-versatile")
@@ -81,7 +58,6 @@ _GROQ_API_KEY  = os.getenv("GROQ_API_KEY",     "")
 _GROQ_URL      = os.getenv("GROQ_URL",         "https://api.groq.com/openai/v1/chat/completions")
 _WAKE_ENABLED  = os.getenv("AIRA_WAKE",   "true").lower() in {"1", "true", "yes"}
 _PROFILE_TRANSCRIBE = os.getenv("AIRA_PROFILE_TRANSCRIBE", "false").lower() in {"1", "true", "yes"}
->>>>>>> master
 
 # ── Initialise agents (models are lazy-loaded on first use) ───────────────────
 _listener = ListenerAgent(model_size=_WHISPER_MODEL, device=_DEVICE)
@@ -100,23 +76,16 @@ _FRONTEND_DIR = os.path.join(_BACKEND_DIR, "..", "frontend")
 _PROFILE_VOICES_DIR = os.path.join(_BACKEND_DIR, "assets", "profile_voices")
 os.makedirs(_PROFILE_VOICES_DIR, exist_ok=True)
 
-<<<<<<< HEAD
-=======
 _ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1"
 _ELEVENLABS_DEFAULT_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
 _ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 
->>>>>>> master
 app = Flask(
     __name__,
     template_folder=os.path.abspath(os.path.join(_FRONTEND_DIR, "templates")),
     static_folder=os.path.abspath(os.path.join(_FRONTEND_DIR, "static")),
 )
-<<<<<<< HEAD
-app.config["SECRET_KEY"] = os.getenv("SARVSATHI_SECRET_KEY", "sarvsathi-dev-secret")
-=======
 app.config["SECRET_KEY"] = os.getenv("AIRA_SECRET_KEY", "aira-dev-secret")
->>>>>>> master
 app.register_blueprint(auth_bp)
 
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -270,7 +239,7 @@ def _convert_profile_audio_to_wav(audio_bytes: bytes) -> bytes | None:
 
         # Fallback path: direct ffmpeg.
         subprocess.run(
-            ["ffmpeg", "-y", "-i", in_path, "-ar", "24000", "-ac", "1", out_path],
+            ["ffmpeg", "-y", "-i", in_path, "-t", "8", "-ar", "24000", "-ac", "1", out_path],
             check=True,
             capture_output=True,
         )
@@ -288,8 +257,6 @@ def _convert_profile_audio_to_wav(audio_bytes: bytes) -> bytes | None:
                     pass
 
 
-<<<<<<< HEAD
-=======
 def _profile_voice_metadata_path(profile_voice_id: str) -> str:
     return os.path.join(_PROFILE_VOICES_DIR, f"{profile_voice_id}.json")
 
@@ -349,7 +316,6 @@ def _store_profile_voice_metadata(profile_voice_id: str, sample_path: str, voice
     return metadata
 
 
->>>>>>> master
 def _sanitize_chat_messages(messages: list, max_messages: int = 12, max_chars: int = 420) -> list[dict]:
     """Keep only recent user/assistant turns with bounded content size."""
     if not isinstance(messages, list):
@@ -399,26 +365,17 @@ def static_files(filename):
 
 @app.route("/api/status", methods=["GET"])
 def status():
-<<<<<<< HEAD
-=======
     active_model = (session.get("groq_model") or _GROQ_MODEL).strip()
     has_groq_key = bool((session.get("groq_api_key") or _GROQ_API_KEY).strip())
->>>>>>> master
     return jsonify({
         "ok": True,
         "device":        _DEVICE,
         "whisper_model": _WHISPER_MODEL,
-<<<<<<< HEAD
-        "llm_model":     _GROQ_MODEL,
-        "wake_enabled":  _WAKE_ENABLED,
-        "voice_clone_ready": _voice.is_clone_ready(),
-=======
         "llm_model":     active_model,
         "groq_key_configured": has_groq_key,
         "wake_enabled":  _WAKE_ENABLED,
         "voice_clone_ready": _voice.is_clone_ready(),
         "voice_clone_backend": _voice.clone_backend(),
->>>>>>> master
     })
 
 
@@ -602,8 +559,6 @@ def companion_voice_upload(companion_id: int):
         with open(save_path, "wb") as fh:
             fh.write(audio_to_store)
 
-<<<<<<< HEAD
-=======
         _store_profile_voice_metadata(
             profile_voice_id=profile_voice_id,
             sample_path=save_path,
@@ -612,7 +567,6 @@ def companion_voice_upload(companion_id: int):
             voice_type=existing.get("voice_type") or "female",
         )
 
->>>>>>> master
         transcript = ""
         warning = None
         if _PROFILE_TRANSCRIBE:
@@ -623,11 +577,7 @@ def companion_voice_upload(companion_id: int):
                 warning = f"profile transcription unavailable: {stt_exc}"
                 print(f"[COMPANION VOICE STT WARN] {stt_exc}")
         else:
-<<<<<<< HEAD
-            warning = "profile transcription skipped (SARVSATHI_PROFILE_TRANSCRIBE=false)"
-=======
             warning = "profile transcription skipped (AIRA_PROFILE_TRANSCRIBE=false)"
->>>>>>> master
 
         row = update_companion(
             user_id=user_id,
@@ -789,24 +739,6 @@ def chat():
             tone_rule = _style_guideline(companion_style)
             system_prompt = (
                 f"{system_prompt}\n\n"
-<<<<<<< HEAD
-                "Companion Persona:\n"
-                f"- Name: {companion_name}\n"
-                f"- Relationship to user: {relationship}\n"
-                f"- Personality style: {companion_style}\n"
-                f"- Preferred neutral language: {preferred_language}\n"
-                f"- You must always call them: \"{nickname}\"\n\n"
-                "Conversation Rules:\n"
-                f"- {tone_rule}\n"
-                "- Sound like a real human: warm, natural, and context-aware phrasing.\n"
-                "- Never sound robotic; avoid assistant disclaimers and repetitive templates.\n"
-                "- Mirror the user's latest language and script choice in every reply.\n"
-                "- Keep factual answers accurate and direct; for emotional chats be empathetic without inventing events."
-            )
-
-        # Call brain agent with structured pipeline
-        result = _brain.think(
-=======
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "COMPANION PERSONA\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -867,7 +799,6 @@ def chat():
 
         # Call brain agent with structured pipeline
         result = brain.think(
->>>>>>> master
             user_text=user_text,
             system_prompt=system_prompt,
             history=history,
@@ -929,11 +860,7 @@ def history():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-<<<<<<< HEAD
-# /api/tts  — Text to Speech (Coqui XTTS v2, fully offline)
-=======
 # /api/tts  — Text to Speech (ElevenLabs clone optional, XTTS fallback)
->>>>>>> master
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.route("/api/tts", methods=["POST"])
@@ -981,10 +908,6 @@ def tts():
         speaker_wav = None
         if profile_voice_id:
             matches = glob(os.path.join(_PROFILE_VOICES_DIR, f"{profile_voice_id}.*"))
-<<<<<<< HEAD
-            if matches:
-                speaker_wav = matches[0]
-=======
             preferred_audio_exts = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".webm", ".mp4", ".bin"}
             for match in matches:
                 ext = os.path.splitext(match)[1].lower()
@@ -993,7 +916,6 @@ def tts():
                     break
             if not speaker_wav:
                 speaker_wav = next((match for match in matches if not match.lower().endswith(".json")), None)
->>>>>>> master
 
         # Synthesize with emotion-aware prosody
         audio_b64, cloned = _voice.synthesize(
@@ -1013,10 +935,7 @@ def tts():
             "profile_voice_loaded": bool(speaker_wav),
             "clone_ready": _voice.is_clone_ready(),
             "tts_language_used": resolved_lang,
-<<<<<<< HEAD
-=======
             "audio_mime": _voice.last_audio_mime(),
->>>>>>> master
         })
 
     except Exception as e:
@@ -1069,17 +988,17 @@ def transcribe_profile_audio():
         with open(save_path, "wb") as fh:
             fh.write(audio_to_store)
 
-<<<<<<< HEAD
-=======
+        # Extract voice_type from form data (sent from frontend)
+        form_voice_type = (request.form.get("voice_type") or "female").strip().lower()
+
         _store_profile_voice_metadata(
             profile_voice_id=profile_voice_id,
             sample_path=save_path,
             voice_name=f"Aira Voice {profile_voice_id[:6]}",
             language_code=lang,
-            voice_type="female",
+            voice_type=form_voice_type,
         )
 
->>>>>>> master
         transcript = ""
         warning = None
         if _PROFILE_TRANSCRIBE:
@@ -1091,11 +1010,7 @@ def transcribe_profile_audio():
                 warning = f"profile transcription unavailable: {stt_exc}"
                 print(f"[PROFILE STT WARN] {stt_exc}")
         else:
-<<<<<<< HEAD
-            warning = "profile transcription skipped (SARVSATHI_PROFILE_TRANSCRIBE=false)"
-=======
             warning = "profile transcription skipped (AIRA_PROFILE_TRANSCRIBE=false)"
->>>>>>> master
 
         return jsonify({
             "ok": True,
@@ -1131,11 +1046,7 @@ if __name__ == "__main__":
     debug = os.getenv("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
 
     print("\n" + "=" * 60)
-<<<<<<< HEAD
-    print("  SarvSathi \u2014 Fully Offline AI Assistant")
-=======
     print("  Aira \u2014 Fully Offline AI Assistant")
->>>>>>> master
     print(f"  Device        : {_DEVICE}")
     print(f"  Whisper model : {_WHISPER_MODEL}")
     print(f"  LLM           : {_GROQ_MODEL}  @  {_GROQ_URL}")

@@ -1,9 +1,5 @@
 """
-<<<<<<< HEAD
-Lightweight SQLite data layer for SarvSathi.
-=======
 Lightweight SQLite data layer for Aira.
->>>>>>> master
 
 Tables:
 - users
@@ -19,13 +15,8 @@ from typing import Any
 
 
 _DB_PATH = os.getenv(
-<<<<<<< HEAD
-    "SARVSATHI_DB_PATH",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "sarvsathi.db"),
-=======
     "AIRA_DB_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "aira.db"),
->>>>>>> master
 )
 
 

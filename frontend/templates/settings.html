@@ -3,11 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<<<<<<< HEAD
-  <title>Companion Settings - Apna Saathi</title>
-=======
   <title>Companion Settings - Aira</title>
->>>>>>> master
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,700;1,400&family=Nunito:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
@@ -39,8 +35,6 @@
         </div>
       </div>
 
-<<<<<<< HEAD
-=======
       <div class="settings-group">
         <label for="groqApiKey">Groq API Key (per browser)</label>
         <input id="groqApiKey" type="password" placeholder="gsk_..." autocomplete="off" />
@@ -51,7 +45,6 @@
         <input id="groqModel" type="text" placeholder="llama-3.1-8b-instant" />
       </div>
 
->>>>>>> master
       <p class="error-msg" id="settingsError" style="display:none"></p>
       <p class="success-msg" id="settingsSuccess" style="display:none"></p>
 
@@ -97,12 +90,9 @@
         const langEl = document.querySelector(`input[name="language"][value="${language}"]`);
         if (styleEl) styleEl.checked = true;
         if (langEl) langEl.checked = true;
-<<<<<<< HEAD
-=======
 
         document.getElementById('groqApiKey').value = localStorage.getItem('aira_groq_api_key') || '';
         document.getElementById('groqModel').value = localStorage.getItem('aira_groq_model') || 'llama-3.1-8b-instant';
->>>>>>> master
       } catch (e) {
         setMsg('Unable to load settings', '');
       }
@@ -112,11 +102,8 @@
       const name = document.getElementById('companionName').value.trim();
       const style = checkedValue('style');
       const language = checkedValue('language');
-<<<<<<< HEAD
-=======
       const groqApiKey = document.getElementById('groqApiKey').value.trim();
       const groqModel = document.getElementById('groqModel').value.trim();
->>>>>>> master
 
       if (!name) {
         setMsg('Companion name is required', '');
@@ -134,12 +121,9 @@
           setMsg(data.error || 'Failed to save settings', '');
           return;
         }
-<<<<<<< HEAD
-=======
 
         localStorage.setItem('aira_groq_api_key', groqApiKey);
         localStorage.setItem('aira_groq_model', groqModel || 'llama-3.1-8b-instant');
->>>>>>> master
         setMsg('', 'Settings saved successfully');
       } catch (e) {
         setMsg('Server error while saving settings', '');

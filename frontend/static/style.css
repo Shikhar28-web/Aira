@@ -1177,6 +1177,39 @@ input, select, textarea, button {
   border-color: rgba(82, 220, 133, 0.45);
   background: rgba(82, 220, 133, 0.12);
 }
+/* Wake button */
+.wake-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 50px;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.wake-btn:hover {
+  background: var(--surface3);
+  border-color: var(--primary);
+}
+.wake-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.wake-btn.listening {
+  background: rgba(239, 187, 83, 0.2);
+  border-color: #efbb53;
+  color: #efbb53;
+  animation: pulse-gold 1.5s infinite;
+}
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 187, 83, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 187, 83, 0); }
+}
 .lang-badge {
   font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em;
   padding: 3px 9px;

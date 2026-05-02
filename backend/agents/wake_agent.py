@@ -1,11 +1,6 @@
 """
 WAKE AGENT
-==========
-<<<<<<< HEAD
-Listens continuously in the background for the wake word **"SarvSathi"**
-=======
 Listens continuously in the background for the wake word **"Aira"**
->>>>>>> master
 and sets a threading.Event when the phrase is detected.
 
 Detection strategy
@@ -14,11 +9,7 @@ Detection strategy
 2. Accumulate a 2-second sliding window.
 3. When the RMS energy exceeds a threshold (speech detected), run
    Faster-Whisper *tiny* (CPU) on the buffered audio.
-<<<<<<< HEAD
-4. If "sarvsathi" (or a common misspelling) appears in the transcript,
-=======
 4. If "aira" (or a common misspelling) appears in the transcript,
->>>>>>> master
    fire ``WakeAgent.detected``.
 
 This requires no API keys, no internet, and no custom wake-word model.
@@ -43,13 +34,8 @@ if TYPE_CHECKING:
 # Words we accept as the wake word (covers ASR misspellings)
 _WAKE_VARIANTS = frozenset(
     [
-<<<<<<< HEAD
-        "sarvsathi",
-        "sarv sathi",
-=======
         "aira",
         "aira",
->>>>>>> master
         "sarvsati",
         "sarv saathi",
         "sarvs athi",
@@ -78,11 +64,7 @@ class WakeAgent:
 
     def __init__(
         self,
-<<<<<<< HEAD
-        wake_word: str = "sarvsathi",
-=======
         wake_word: str = "aira",
->>>>>>> master
         energy_threshold: float = _ENERGY_THRESH,
     ) -> None:
         self.wake_word       = wake_word.lower()
